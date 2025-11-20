@@ -49,22 +49,40 @@ const SohuCrawler = {
                 console.warn('未找到时间元素');
             }
 
-            // Extract source (optional - some pages don't have it)
-            const sourceEl = safeQuery(document, [
-                '[data-role="original-link"]',
-                '[class*="source"]'
+            // Extract author information
+            // Method 1: Try responsibility editor (data-role="editor-name")
+            const editorEl = safeQuery(document, [
+                '[data-role="editor-name"]',
+                '.editor-name'
             ]);
-            if (sourceEl) {
-                const sourceName = cleanText(sourceEl.textContent.replace('来源:', ''));
-                article.author.nickname = sourceName;
-                if (sourceEl.tagName === 'A') {
-                    article.author.url = normalizeUrl(sourceEl.href);
+
+            if (editorEl) {
+                // Extract editor name from "责任编辑：xxx" format
+                const editorText = cleanText(editorEl.textContent);
+                const match = editorText.match(/责任编辑[：:]\s*(.+)/);
+                if (match) {
+                    article.author.nickname = match[1].trim();
+                    console.log('责任编辑:', article.author.nickname);
+                } else {
+                    article.author.nickname = editorText;
                 }
-                console.log('来源:', sourceName);
             } else {
-                console.warn('未找到来源元素 (某些页面可能没有来源信息)');
-                // Set default author if no source found
-                article.author.nickname = 'Sohu';
+                // Method 2: Try source link
+                const sourceEl = safeQuery(document, [
+                    '[data-role="original-link"]',
+                    '[class*="source"] a',
+                    'a[href*="mp.sohu.com"]'
+                ]);
+
+                if (sourceEl) {
+                    article.author.nickname = cleanText(sourceEl.textContent);
+                    article.author.url = normalizeUrl(sourceEl.href);
+                    console.log('来源:', article.author.nickname);
+                } else {
+                    // Fallback: use "Sohu"
+                    article.author.nickname = 'Sohu';
+                    console.warn('未找到作者信息,使用默认值');
+                }
             }
 
             // Extract article content - support multiple formats

@@ -165,13 +165,33 @@ function cleanText(text) {
 }
 
 /**
- * Extracts and formats image data
+ * Extracts and formats image data (only content images, not UI elements)
  * @param {HTMLImageElement} imgElement - Image element
  * @param {string} baseUrl - Base URL for relative URLs (optional)
  * @returns {Object} Image object matching ImageSchema
  */
 function extractImage(imgElement, baseUrl = '') {
     if (!imgElement) return null;
+
+    // Skip UI elements and non-content images
+    const classList = imgElement.className || '';
+    const skipClasses = [
+        'avatar', 'logo', 'icon', 'emoji', 'qrcode', 'ad',
+        'banner', 'placeholder', 'blank', 'button', 'nav'
+    ];
+
+    for (const skipClass of skipClasses) {
+        if (classList.toLowerCase().includes(skipClass)) {
+            return null;
+        }
+    }
+
+    // Skip small images (likely icons or UI elements)
+    const width = parseInt(imgElement.width) || parseInt(imgElement.naturalWidth) || 0;
+    const height = parseInt(imgElement.height) || parseInt(imgElement.naturalHeight) || 0;
+    if ((width > 0 && width < 50) || (height > 0 && height < 50)) {
+        return null;
+    }
 
     // Try multiple attributes for image source
     const src = imgElement.src ||
@@ -182,22 +202,40 @@ function extractImage(imgElement, baseUrl = '') {
 
     if (!src) return null;
 
+    // Skip blank/placeholder images
+    if (src.includes('blank.gif') ||
+        src.includes('placeholder') ||
+        src.includes('loading.gif') ||
+        src.includes('data:image/svg')) {
+        return null;
+    }
+
     return {
         src: normalizeUrl(src, baseUrl),
         alt: cleanText(imgElement.alt || imgElement.getAttribute('title') || ''),
-        width: parseInt(imgElement.width) || 0,
-        height: parseInt(imgElement.height) || 0
+        width: width,
+        height: height
     };
 }
 
 /**
- * Extracts and formats video data
+ * Extracts and formats video data (only content videos, not ads or UI)
  * @param {HTMLVideoElement|HTMLElement} videoElement - Video or iframe element
  * @param {string} baseUrl - Base URL for relative URLs (optional)
  * @returns {Object} Video object matching VideoSchema
  */
 function extractVideo(videoElement, baseUrl = '') {
     if (!videoElement) return null;
+
+    // Skip ad videos and UI elements
+    const classList = videoElement.className || '';
+    const skipClasses = ['ad', 'advertisement', 'banner', 'promo'];
+
+    for (const skipClass of skipClasses) {
+        if (classList.toLowerCase().includes(skipClass)) {
+            return null;
+        }
+    }
 
     let src = '';
     let poster = '';
@@ -212,8 +250,23 @@ function extractVideo(videoElement, baseUrl = '') {
     } else if (videoElement.tagName === 'IFRAME') {
         src = videoElement.src || '';
         title = videoElement.getAttribute('title') || '';
+
+        // Skip non-video iframes
+        if (!src.includes('video') &&
+            !src.includes('player') &&
+            !src.includes('v.qq.com') &&
+            !src.includes('youtube') &&
+            !src.includes('youku') &&
+            !src.includes('bilibili')) {
+            return null;
+        }
     } else {
-        // Try to find source element
+        // Try to find source element or video tag inside
+        const videoTag = videoElement.querySelector('video');
+        if (videoTag) {
+            return extractVideo(videoTag, baseUrl);
+        }
+
         const sourceEl = videoElement.querySelector('source');
         if (sourceEl) {
             src = sourceEl.src || sourceEl.getAttribute('data-src') || '';

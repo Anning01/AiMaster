@@ -34,8 +34,68 @@ const NeteaseCrawler = {
                 console.warn('未找到标题元素');
             }
 
-            // Extract publish time and author
-            console.log('提取元信息...');
+            // Extract publish time - try multiple methods
+            console.log('提取发布时间...');
+
+            // Method 1: Try data-publishtime attribute on html or body
+            let timeStr = document.documentElement.getAttribute('data-publishtime') ||
+                         document.documentElement.getAttribute('data-ptime') ||
+                         document.body?.getAttribute('data-ptime');
+
+            // Method 2: Try meta tag
+            if (!timeStr) {
+                const metaTime = safeQuery(document, [
+                    'meta[property="article:published_time"]',
+                    'meta[name="publishdate"]'
+                ]);
+                if (metaTime) {
+                    timeStr = metaTime.getAttribute('content');
+                }
+            }
+
+            // Method 3: Try wrapper div
+            if (!timeStr) {
+                const wrapperEl = safeQuery(document, [
+                    '#contain[data-ptime]',
+                    '[data-ptime]',
+                    '.wrapper[data-ptime]'
+                ]);
+                if (wrapperEl) {
+                    timeStr = wrapperEl.getAttribute('data-ptime');
+                }
+            }
+
+            // Method 4: Try info element
+            if (!timeStr) {
+                const infoEl = safeQuery(document, [
+                    '.post_info',
+                    '.post-info',
+                    '.article-info',
+                    '[class*="info"]'
+                ]);
+
+                if (infoEl) {
+                    const timeEl = safeQuery(infoEl, [
+                        '.post_time',
+                        '[class*="time"]',
+                        'time',
+                        'span:first-child'
+                    ]);
+                    if (timeEl) {
+                        timeStr = timeEl.textContent;
+                    }
+                }
+            }
+
+            if (timeStr) {
+                article.publishTime = formatTime(timeStr);
+                console.log('发布时间:', article.publishTime);
+            } else {
+                console.warn('未找到发布时间');
+            }
+
+            // Extract author
+            console.log('提取作者信息...');
             const infoEl = safeQuery(document, [
                 '.post_info',
                 '.post-info',
@@ -44,19 +104,6 @@ const NeteaseCrawler = {
             ]);
 
             if (infoEl) {
-                // Extract time
-                const timeEl = safeQuery(infoEl, [
-                    '.post_time',
-                    '[class*="time"]',
-                    'time',
-                    'span:first-child'
-                ]);
-                if (timeEl) {
-                    article.publishTime = formatTime(timeEl.textContent);
-                    console.log('发布时间:', article.publishTime);
-                }
-
-                // Extract author
                 const authorEl = safeQuery(infoEl, [
                     '.post_author',
                     '[class*="author"]',
@@ -70,15 +117,15 @@ const NeteaseCrawler = {
                     console.log('作者:', article.author.nickname);
                 }
             } else {
-                console.warn('未找到元信息容器');
+                console.warn('未找到作者信息容器');
             }
 
             // Extract article content
             console.log('提取文章内容...');
             const contentEl = safeQuery(document, [
-                '.post_main',
-                '.post_body',
+                '.post_body',      // Most precise - excludes .post_next recommendations
                 '.post_text',
+                '.post_main',      // Fallback - includes .post_next
                 '#content',
                 'article',
                 '[class*="content"]'
@@ -94,12 +141,35 @@ const NeteaseCrawler = {
                 ]);
                 console.log('找到段落数量:', paragraphs.length);
 
-                paragraphs.forEach((p, index) => {
+                // Find where content ends (before disclaimers/comments)
+                let stopAdding = false;
+
+                paragraphs.forEach((p) => {
                     const text = cleanText(p.textContent);
-                    // Only add non-empty paragraphs with sufficient length
-                    if (text && text.length > 10 && !p.classList.contains('ep-source')) {
+
+                    // Stop if we hit disclaimer or comment section
+                    if (text.includes('特别声明') ||
+                        text.includes('Notice: The content above') ||
+                        text.includes('网友评论仅供') ||
+                        text.includes('仅提供信息存储服务') ||
+                        p.classList.contains('tie-reminder')) {
+                        stopAdding = true;
+                        return;
+                    }
+
+                    // Skip if already in disclaimer/comment area
+                    if (stopAdding) {
+                        return;
+                    }
+
+                    // Only add non-empty paragraphs
+                    if (text &&
+                        text.length > 10 &&
+                        !p.classList.contains('ep-source') &&
+                        !text.match(/^\d{4}-\d{2}-\d{2}/) && // Skip dates
+                        !text.includes('跟贴') &&
+                        !text.includes('参与')) {
                         article.contentList.push(text);
-                        console.log(`段落 #${index + 1}:`, text.substring(0, 50) + '...');
                     }
                 });
                 console.log('提取段落数量:', article.contentList.length);

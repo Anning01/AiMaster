@@ -19,11 +19,11 @@ const ChinaDailyCrawler = {
             const article = createEmptyArticle();
             article.url = window.location.href;
 
-            // Extract title - using stable elements
+            // Extract title - using stable elements (avoid .Artical_Title which contains ads)
             console.log('提取标题...');
             const titleEl = safeQuery(document, [
+                '.Artical_Title h1',     // h1 inside .Artical_Title (not the container itself)
                 'h1',
-                '.Artical_Title',
                 '.article-title',
                 '.title',
                 'h1[class*="title"]'
@@ -35,51 +35,111 @@ const ChinaDailyCrawler = {
                 console.warn('未找到标题元素');
             }
 
-            // Extract publish time and author
-            console.log('提取元信息...');
-            const infoEl = safeQuery(document, [
-                '.info',
-                '.article-info',
-                '.Artical_Info',
-                '[class*="info"]'
+            // Extract publish time - try multiple methods
+            console.log('提取发布时间...');
+            let timeStr = '';
+
+            // Method 1: Try meta tag
+            const metaTime = safeQuery(document, [
+                'meta[name="publishdate"]',
+                'meta[property="article:published_time"]'
             ]);
-
-            if (infoEl) {
-                // Extract time
-                const timeEl = safeQuery(infoEl, [
-                    '[class*="time"]',
-                    '.date',
-                    'time',
-                    'span'
-                ]);
-                if (timeEl) {
-                    article.publishTime = formatTime(timeEl.textContent);
-                    console.log('发布时间:', article.publishTime);
-                }
-
-                // Extract author/source
-                const authorEl = safeQuery(infoEl, [
-                    '[class*="author"]',
-                    '[class*="source"]',
-                    'a',
-                    'span'
-                ]);
-                if (authorEl) {
-                    article.author.nickname = cleanText(authorEl.textContent);
-                    if (authorEl.tagName === 'A') {
-                        article.author.url = normalizeUrl(authorEl.href);
-                    }
-                    console.log('作者:', article.author.nickname);
-                }
-            } else {
-                console.warn('未找到元信息容器');
+            if (metaTime) {
+                timeStr = metaTime.getAttribute('content');
             }
 
-            // Extract article content
+            // Method 2: Try date element in page
+            if (!timeStr) {
+                const dateEl = safeQuery(document, [
+                    '.Artical_Share_Date',
+                    '[class*="Date"]',
+                    '[class*="date"]',
+                    '[class*="time"]',
+                    'time'
+                ]);
+                if (dateEl) {
+                    timeStr = dateEl.textContent;
+                }
+            }
+
+            // Method 3: Try info container
+            if (!timeStr) {
+                const infoEl = safeQuery(document, [
+                    '.info',
+                    '.article-info',
+                    '.Artical_Info',
+                    '[class*="info"]'
+                ]);
+
+                if (infoEl) {
+                    const timeEl = safeQuery(infoEl, [
+                        '[class*="time"]',
+                        '.date',
+                        'time',
+                        'span'
+                    ]);
+                    if (timeEl) {
+                        timeStr = timeEl.textContent;
+                    }
+                }
+            }
+
+            if (timeStr) {
+                article.publishTime = formatTime(timeStr);
+                console.log('发布时间:', article.publishTime);
+            } else {
+                console.warn('未找到发布时间');
+            }
+
+            // Extract author - try multiple methods
+            console.log('提取作者信息...');
+
+            // Method 1: Try meta tag
+            let authorName = '';
+            const metaAuthor = safeQuery(document, ['meta[name="author"]']);
+            if (metaAuthor) {
+                authorName = metaAuthor.getAttribute('content');
+            }
+
+            // Method 2: Try page elements
+            if (!authorName) {
+                const infoEl = safeQuery(document, [
+                    '.info',
+                    '.article-info',
+                    '.Artical_Info',
+                    '[class*="info"]'
+                ]);
+
+                if (infoEl) {
+                    const authorEl = safeQuery(infoEl, [
+                        '[class*="author"]',
+                        '[class*="source"]',
+                        'a',
+                        'span'
+                    ]);
+                    if (authorEl) {
+                        authorName = cleanText(authorEl.textContent);
+                        if (authorEl.tagName === 'A') {
+                            article.author.url = normalizeUrl(authorEl.href);
+                        }
+                    }
+                }
+            }
+
+            // Method 3: Use site name as fallback
+            if (!authorName) {
+                authorName = 'China Daily';
+            }
+
+            article.author.nickname = cleanText(authorName);
+            console.log('作者:', article.author.nickname);
+
+            // Extract article content (use #Content to exclude .Artical_Title ads)
             console.log('提取文章内容...');
             const contentEl = safeQuery(document, [
-                '.Artical_Body_Left',
-                '#Content',
+                '#Content',              // Most precise - excludes .Artical_Title
+                '.Artical_Content',
+                '.Artical_Body_Left',    // Fallback - may include ads
                 'article',
                 '[class*="article-content"]',
                 '[class*="content"]'
