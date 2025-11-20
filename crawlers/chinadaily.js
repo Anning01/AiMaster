@@ -15,94 +15,122 @@ const ChinaDailyCrawler = {
         console.log('当前页面 URL:', window.location.href);
 
         try {
-            const article = {
-                title: '',
-                publishTime: '',
-                author: '',
-                source: '',
-                contents: [],
-                images: [],
-                videos: [],
-                commentCount: 0,
-                comments: []
-            };
+            // Create article using unified schema
+            const article = createEmptyArticle();
+            article.url = window.location.href;
 
-            // Extract title
+            // Extract title - using stable elements
             console.log('提取标题...');
-            const titleEl = document.querySelector('h1, .Artical_Title, .article-title, .title');
+            const titleEl = safeQuery(document, [
+                'h1',
+                '.Artical_Title',
+                '.article-title',
+                '.title',
+                'h1[class*="title"]'
+            ]);
             if (titleEl) {
-                article.title = titleEl.textContent.trim();
+                article.title = cleanText(titleEl.textContent);
                 console.log('标题:', article.title);
             } else {
                 console.warn('未找到标题元素');
             }
 
             // Extract publish time and author
-            const infoEl = document.querySelector('.info, .article-info, .Artical_Info');
+            console.log('提取元信息...');
+            const infoEl = safeQuery(document, [
+                '.info',
+                '.article-info',
+                '.Artical_Info',
+                '[class*="info"]'
+            ]);
+
             if (infoEl) {
-                const timeEl = infoEl.querySelector('[class*="time"], .date');
+                // Extract time
+                const timeEl = safeQuery(infoEl, [
+                    '[class*="time"]',
+                    '.date',
+                    'time',
+                    'span'
+                ]);
                 if (timeEl) {
-                    article.publishTime = timeEl.textContent.trim();
+                    article.publishTime = formatTime(timeEl.textContent);
                     console.log('发布时间:', article.publishTime);
                 }
 
-                const authorEl = infoEl.querySelector('[class*="author"], [class*="source"]');
+                // Extract author/source
+                const authorEl = safeQuery(infoEl, [
+                    '[class*="author"]',
+                    '[class*="source"]',
+                    'a',
+                    'span'
+                ]);
                 if (authorEl) {
-                    article.author = authorEl.textContent.trim();
-                    console.log('作者:', article.author);
+                    article.author.nickname = cleanText(authorEl.textContent);
+                    if (authorEl.tagName === 'A') {
+                        article.author.url = normalizeUrl(authorEl.href);
+                    }
+                    console.log('作者:', article.author.nickname);
                 }
+            } else {
+                console.warn('未找到元信息容器');
             }
 
             // Extract article content
             console.log('提取文章内容...');
-            const contentEl = document.querySelector('.Artical_Body_Left, #Content, article, [class*="article-content"]');
+            const contentEl = safeQuery(document, [
+                '.Artical_Body_Left',
+                '#Content',
+                'article',
+                '[class*="article-content"]',
+                '[class*="content"]'
+            ]);
+
             if (contentEl) {
                 console.log('找到内容容器');
 
-                // Extract paragraphs
-                const paragraphs = contentEl.querySelectorAll('p');
+                // Extract paragraphs - using unified format
+                const paragraphs = safeQueryAll(contentEl, [
+                    'p:not(.source)',
+                    'p'
+                ]);
                 console.log('找到段落数量:', paragraphs.length);
 
-                paragraphs.forEach((p) => {
-                    const text = p.textContent.trim();
+                paragraphs.forEach((p, index) => {
+                    const text = cleanText(p.textContent);
                     if (text && text.length > 10 && !p.classList.contains('source')) {
-                        article.contents.push({
-                            type: 'text',
-                            content: text
-                        });
+                        article.contentList.push(text);
+                        console.log(`段落 #${index + 1}:`, text.substring(0, 50) + '...');
                     }
                 });
-                console.log('提取段落数量:', article.contents.length);
+                console.log('提取段落数量:', article.contentList.length);
 
-                // Extract images
-                const images = contentEl.querySelectorAll('img');
+                // Extract images - using unified format
+                const images = safeQueryAll(contentEl, ['img']);
                 console.log('找到图片数量:', images.length);
 
                 images.forEach((img) => {
-                    const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-original');
-                    if (src) {
-                        article.images.push({
-                            src: src,
-                            alt: img.alt || '',
-                            title: img.title || ''
-                        });
+                    const imageObj = extractImage(img);
+                    if (imageObj && imageObj.src) {
+                        article.imageList.push(imageObj);
                     }
                 });
-                console.log('提取图片数量:', article.images.length);
+                console.log('提取图片数量:', article.imageList.length);
 
-                // Extract videos
-                const videos = contentEl.querySelectorAll('video, iframe[src*="video"]');
+                // Extract videos - using unified format
+                const videos = safeQueryAll(contentEl, [
+                    'video',
+                    'iframe[src*="video"]',
+                    '[class*="video"]'
+                ]);
+                console.log('找到视频数量:', videos.length);
+
                 videos.forEach((video) => {
-                    const src = video.src || video.getAttribute('data-src');
-                    if (src) {
-                        article.videos.push({
-                            src: src,
-                            poster: video.poster || '',
-                            type: video.tagName.toLowerCase()
-                        });
+                    const videoObj = extractVideo(video);
+                    if (videoObj && videoObj.src) {
+                        article.videoList.push(videoObj);
                     }
                 });
-                console.log('提取视频数量:', article.videos.length);
+                console.log('提取视频数量:', article.videoList.length);
             } else {
                 console.error('未找到内容容器');
             }
@@ -111,24 +139,27 @@ const ChinaDailyCrawler = {
             console.log('提取评论数据...');
             const commentData = ChinaDailyCrawler.crawlComments();
             article.commentCount = commentData.count;
-            article.comments = commentData.list;
+            article.commentList = commentData.list;
             console.log('评论数量:', article.commentCount);
-            console.log('实际提取评论数:', article.comments.length);
+            console.log('实际提取评论数:', article.commentList.length);
 
-            // Validate
-            if (!article.title) {
-                console.error('标题为空，爬取失败');
-                throw new Error('Failed to extract article title');
+            // Validate using unified schema
+            const validation = validateArticle(article);
+            if (!validation.valid) {
+                console.error('数据验证失败:', validation.errors);
+                throw new Error('Article data validation failed: ' + validation.errors.join(', '));
             }
 
             console.log('=== China Daily 爬虫完成 ===');
             console.log('最终数据摘要:', {
+                url: article.url,
                 title: article.title,
-                author: article.author,
-                paragraphs: article.contents.length,
-                images: article.images.length,
-                videos: article.videos.length,
-                comments: article.comments.length
+                author: article.author.nickname,
+                publishTime: article.publishTime,
+                paragraphs: article.contentList.length,
+                images: article.imageList.length,
+                videos: article.videoList.length,
+                comments: article.commentList.length
             });
 
             return article;
@@ -141,7 +172,7 @@ const ChinaDailyCrawler = {
         }
     },
 
-    // Extract comments
+    // Extract comments (using unified schema)
     crawlComments: () => {
         console.log('--- 开始提取评论 ---');
 
@@ -151,50 +182,84 @@ const ChinaDailyCrawler = {
         };
 
         try {
-            const commentContainer = document.querySelector('#comment, [class*="comment"]');
+            const commentContainer = safeQuery(document, [
+                '#comment',
+                '[class*="comment"]',
+                '[id*="comment"]'
+            ]);
 
             if (commentContainer) {
                 // Try to find comment count
-                const countEl = commentContainer.querySelector('[class*="count"], [class*="total"]');
+                const countEl = safeQuery(commentContainer, [
+                    '[class*="count"]',
+                    '[class*="total"]',
+                    '[class*="num"]'
+                ]);
                 if (countEl) {
-                    const countMatch = countEl.textContent.match(/(\d+)/);
-                    if (countMatch) {
-                        result.count = parseInt(countMatch[1]) || 0;
-                        console.log('评论总数:', result.count);
-                    }
+                    result.count = parseNumber(countEl.textContent);
+                    console.log('评论总数:', result.count);
+                } else {
+                    console.warn('未找到评论计数元素');
                 }
 
                 // Try to find comment items
-                const commentItems = commentContainer.querySelectorAll('[class*="item"], li');
+                const commentItems = safeQueryAll(commentContainer, [
+                    '[class*="item"]',
+                    'li',
+                    '[class*="comment"]'
+                ]);
                 console.log('找到评论项数量:', commentItems.length);
 
                 commentItems.forEach((item, index) => {
                     console.log(`处理评论 #${index + 1}...`);
 
-                    const comment = {
-                        nickname: '',
-                        content: '',
-                        time: '',
-                        likes: 0
-                    };
+                    // Avatar
+                    const avatarImg = safeQuery(item, [
+                        'img[class*="avatar"]',
+                        '.avatar img',
+                        'img'
+                    ]);
+                    const avatar = avatarImg ? normalizeUrl(avatarImg.src) : '';
 
-                    const nicknameEl = item.querySelector('[class*="name"], [class*="user"]');
-                    if (nicknameEl) comment.nickname = nicknameEl.textContent.trim();
+                    // Nickname
+                    const nicknameEl = safeQuery(item, [
+                        '[class*="name"]',
+                        '[class*="user"]',
+                        '[class*="author"]'
+                    ]);
+                    const nickname = nicknameEl ? cleanText(nicknameEl.textContent) : '';
 
-                    const contentEl = item.querySelector('[class*="content"], [class*="text"]');
-                    if (contentEl) comment.content = contentEl.textContent.trim();
+                    // Content
+                    const contentEl = safeQuery(item, [
+                        '[class*="content"]',
+                        '[class*="text"]',
+                        'p'
+                    ]);
+                    const content = contentEl ? cleanText(contentEl.textContent) : '';
 
-                    const timeEl = item.querySelector('[class*="time"]');
-                    if (timeEl) comment.time = timeEl.textContent.trim();
+                    // Time
+                    const timeEl = safeQuery(item, [
+                        '[class*="time"]',
+                        '.time',
+                        'time'
+                    ]);
+                    const publishTime = timeEl ? formatTime(timeEl.textContent) : '';
 
                     console.log(`评论 #${index + 1}:`, {
-                        nickname: comment.nickname,
-                        content: comment.content.substring(0, 30) + '...',
-                        time: comment.time
+                        nickname: nickname,
+                        content: content.substring(0, 30) + '...',
+                        time: publishTime
                     });
 
-                    if (comment.nickname && comment.content) {
-                        result.list.push(comment);
+                    // Only add if we have basic info - using unified schema
+                    if (nickname && content) {
+                        result.list.push(createComment(
+                            avatar,
+                            nickname,
+                            publishTime,
+                            content,
+                            [] // China Daily comments typically don't have nested replies
+                        ));
                     } else {
                         console.warn(`评论 #${index + 1} 数据不完整，跳过`);
                     }
@@ -218,11 +283,13 @@ const ChinaDailyCrawler = {
         return result;
     },
 
+    // Get full article data (article + comments)
     crawl: () => {
         return ChinaDailyCrawler.crawlArticle();
     }
 };
 
+// Export for use in content script
 if (typeof window !== 'undefined') {
     window.ChinaDailyCrawler = ChinaDailyCrawler;
 }

@@ -89,7 +89,7 @@ Content script 响应: {success: true, platform: 'toutiao', platformName: 'Touti
   }
 }
 后端响应状态: 200 OK
-后端响应数据: {success: true, taskId: 'task_123'}
+后端响应数据: {success: true, task_id: 1}
 === 爬取流程结束 ===
 ```
 

@@ -15,93 +15,129 @@ const NeteaseCrawler = {
         console.log('当前页面 URL:', window.location.href);
 
         try {
-            const article = {
-                title: '',
-                publishTime: '',
-                author: '',
-                source: '',
-                contents: [],
-                images: [],
-                videos: [],
-                commentCount: 0,
-                comments: []
-            };
+            // Create article using unified schema
+            const article = createEmptyArticle();
+            article.url = window.location.href;
 
-            // Extract title
+            // Extract title - using stable elements
             console.log('提取标题...');
-            const titleEl = document.querySelector('h1, .post_title, .title');
+            const titleEl = safeQuery(document, [
+                'h1',
+                '.post_title',
+                '.title',
+                'h1[class*="title"]'
+            ]);
             if (titleEl) {
-                article.title = titleEl.textContent.trim();
+                article.title = cleanText(titleEl.textContent);
                 console.log('标题:', article.title);
             } else {
                 console.warn('未找到标题元素');
             }
 
             // Extract publish time and author
-            const infoEl = document.querySelector('.post_info, .post-info, .article-info');
+            console.log('提取元信息...');
+            const infoEl = safeQuery(document, [
+                '.post_info',
+                '.post-info',
+                '.article-info',
+                '[class*="info"]'
+            ]);
+
             if (infoEl) {
-                const timeEl = infoEl.querySelector('.post_time, [class*="time"]');
+                // Extract time
+                const timeEl = safeQuery(infoEl, [
+                    '.post_time',
+                    '[class*="time"]',
+                    'time',
+                    'span:first-child'
+                ]);
                 if (timeEl) {
-                    article.publishTime = timeEl.textContent.trim();
+                    article.publishTime = formatTime(timeEl.textContent);
                     console.log('发布时间:', article.publishTime);
                 }
 
-                const authorEl = infoEl.querySelector('.post_author, [class*="author"], a');
+                // Extract author
+                const authorEl = safeQuery(infoEl, [
+                    '.post_author',
+                    '[class*="author"]',
+                    'a'
+                ]);
                 if (authorEl) {
-                    article.author = authorEl.textContent.trim();
-                    console.log('作者:', article.author);
+                    article.author.nickname = cleanText(authorEl.textContent);
+                    if (authorEl.tagName === 'A') {
+                        article.author.url = normalizeUrl(authorEl.href);
+                    }
+                    console.log('作者:', article.author.nickname);
                 }
+            } else {
+                console.warn('未找到元信息容器');
             }
 
             // Extract article content
             console.log('提取文章内容...');
-            const contentEl = document.querySelector('.post_main, .post_body, .post_text, #content, article');
+            const contentEl = safeQuery(document, [
+                '.post_main',
+                '.post_body',
+                '.post_text',
+                '#content',
+                'article',
+                '[class*="content"]'
+            ]);
+
             if (contentEl) {
                 console.log('找到内容容器');
 
-                // Extract paragraphs
-                const paragraphs = contentEl.querySelectorAll('p');
+                // Extract paragraphs - using unified format
+                const paragraphs = safeQueryAll(contentEl, [
+                    'p:not(.ep-source)',
+                    'p'
+                ]);
                 console.log('找到段落数量:', paragraphs.length);
 
-                paragraphs.forEach((p) => {
-                    const text = p.textContent.trim();
+                paragraphs.forEach((p, index) => {
+                    const text = cleanText(p.textContent);
+                    // Only add non-empty paragraphs with sufficient length
                     if (text && text.length > 10 && !p.classList.contains('ep-source')) {
-                        article.contents.push({
-                            type: 'text',
-                            content: text
-                        });
+                        article.contentList.push(text);
+                        console.log(`段落 #${index + 1}:`, text.substring(0, 50) + '...');
                     }
                 });
-                console.log('提取段落数量:', article.contents.length);
+                console.log('提取段落数量:', article.contentList.length);
 
-                // Extract images
-                const images = contentEl.querySelectorAll('img');
+                // Extract images - using unified format
+                const images = safeQueryAll(contentEl, [
+                    'img:not([src*="blank.gif"])',
+                    'img'
+                ]);
                 console.log('找到图片数量:', images.length);
 
                 images.forEach((img) => {
+                    // Skip blank placeholder images
                     const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-echo');
                     if (src && !src.includes('blank.gif')) {
-                        article.images.push({
-                            src: src,
-                            alt: img.alt || '',
-                            title: img.title || ''
-                        });
+                        const imageObj = extractImage(img);
+                        if (imageObj && imageObj.src) {
+                            article.imageList.push(imageObj);
+                        }
                     }
                 });
-                console.log('提取图片数量:', article.images.length);
+                console.log('提取图片数量:', article.imageList.length);
 
-                // Extract videos
-                const videos = contentEl.querySelectorAll('video, [class*="video"]');
+                // Extract videos - using unified format
+                const videos = safeQueryAll(contentEl, [
+                    'video',
+                    '[class*="video"]',
+                    'iframe[src*="video"]'
+                ]);
+                console.log('找到视频数量:', videos.length);
+
                 videos.forEach((video) => {
-                    if (video.src || video.getAttribute('data-src')) {
-                        article.videos.push({
-                            src: video.src || video.getAttribute('data-src'),
-                            poster: video.poster || '',
-                            type: video.tagName.toLowerCase()
-                        });
+                    const videoObj = extractVideo(video);
+                    if (videoObj && videoObj.src) {
+                        article.videoList.push(videoObj);
                     }
                 });
-                console.log('提取视频数量:', article.videos.length);
+                console.log('提取视频数量:', article.videoList.length);
             } else {
                 console.error('未找到内容容器');
             }
@@ -110,24 +146,27 @@ const NeteaseCrawler = {
             console.log('提取评论数据...');
             const commentData = NeteaseCrawler.crawlComments();
             article.commentCount = commentData.count;
-            article.comments = commentData.list;
+            article.commentList = commentData.list;
             console.log('评论数量:', article.commentCount);
-            console.log('实际提取评论数:', article.comments.length);
+            console.log('实际提取评论数:', article.commentList.length);
 
-            // Validate
-            if (!article.title) {
-                console.error('标题为空，爬取失败');
-                throw new Error('Failed to extract article title');
+            // Validate using unified schema
+            const validation = validateArticle(article);
+            if (!validation.valid) {
+                console.error('数据验证失败:', validation.errors);
+                throw new Error('Article data validation failed: ' + validation.errors.join(', '));
             }
 
             console.log('=== NetEase 爬虫完成 ===');
             console.log('最终数据摘要:', {
+                url: article.url,
                 title: article.title,
-                author: article.author,
-                paragraphs: article.contents.length,
-                images: article.images.length,
-                videos: article.videos.length,
-                comments: article.comments.length
+                author: article.author.nickname,
+                publishTime: article.publishTime,
+                paragraphs: article.contentList.length,
+                images: article.imageList.length,
+                videos: article.videoList.length,
+                comments: article.commentList.length
             });
 
             return article;
@@ -140,7 +179,7 @@ const NeteaseCrawler = {
         }
     },
 
-    // Extract comments
+    // Extract comments (using unified schema)
     crawlComments: () => {
         console.log('--- 开始提取评论 ---');
 
@@ -151,57 +190,84 @@ const NeteaseCrawler = {
 
         try {
             // NetEase comments are often loaded dynamically
-            const commentContainer = document.querySelector('#comment, .comment-list, [class*="comment"]');
+            const commentContainer = safeQuery(document, [
+                '#comment',
+                '.comment-list',
+                '[class*="comment"]'
+            ]);
 
             if (commentContainer) {
                 // Try to find comment count
-                const countEl = commentContainer.querySelector('[class*="count"], [class*="total"], .title span');
+                const countEl = safeQuery(commentContainer, [
+                    '[class*="count"]',
+                    '[class*="total"]',
+                    '.title span'
+                ]);
                 if (countEl) {
-                    const countMatch = countEl.textContent.match(/(\d+)/);
-                    if (countMatch) {
-                        result.count = parseInt(countMatch[1]) || 0;
-                        console.log('评论总数:', result.count);
-                    }
+                    result.count = parseNumber(countEl.textContent);
+                    console.log('评论总数:', result.count);
+                } else {
+                    console.warn('未找到评论计数元素');
                 }
 
                 // Try to find comment items
-                const commentItems = commentContainer.querySelectorAll('[class*="item"], li');
+                const commentItems = safeQueryAll(commentContainer, [
+                    '[class*="item"]',
+                    'li',
+                    '[class*="comment"]'
+                ]);
                 console.log('找到评论项数量:', commentItems.length);
 
                 commentItems.forEach((item, index) => {
                     console.log(`处理评论 #${index + 1}...`);
 
-                    const comment = {
-                        nickname: '',
-                        content: '',
-                        time: '',
-                        likes: 0
-                    };
+                    // Avatar
+                    const avatarImg = safeQuery(item, [
+                        'img[class*="avatar"]',
+                        '.avatar img',
+                        'img'
+                    ]);
+                    const avatar = avatarImg ? normalizeUrl(avatarImg.src) : '';
 
-                    const nicknameEl = item.querySelector('[class*="name"], [class*="user"], .nick');
-                    if (nicknameEl) comment.nickname = nicknameEl.textContent.trim();
+                    // Nickname
+                    const nicknameEl = safeQuery(item, [
+                        '[class*="name"]',
+                        '[class*="user"]',
+                        '.nick'
+                    ]);
+                    const nickname = nicknameEl ? cleanText(nicknameEl.textContent) : '';
 
-                    const contentEl = item.querySelector('[class*="content"], [class*="text"], .txt');
-                    if (contentEl) comment.content = contentEl.textContent.trim();
+                    // Content
+                    const contentEl = safeQuery(item, [
+                        '[class*="content"]',
+                        '[class*="text"]',
+                        '.txt'
+                    ]);
+                    const content = contentEl ? cleanText(contentEl.textContent) : '';
 
-                    const timeEl = item.querySelector('[class*="time"], .time');
-                    if (timeEl) comment.time = timeEl.textContent.trim();
-
-                    const likeEl = item.querySelector('[class*="like"], .ding');
-                    if (likeEl) {
-                        const likeMatch = likeEl.textContent.match(/(\d+)/);
-                        if (likeMatch) comment.likes = parseInt(likeMatch[1]) || 0;
-                    }
+                    // Time
+                    const timeEl = safeQuery(item, [
+                        '[class*="time"]',
+                        '.time',
+                        'time'
+                    ]);
+                    const publishTime = timeEl ? formatTime(timeEl.textContent) : '';
 
                     console.log(`评论 #${index + 1}:`, {
-                        nickname: comment.nickname,
-                        content: comment.content.substring(0, 30) + '...',
-                        time: comment.time,
-                        likes: comment.likes
+                        nickname: nickname,
+                        content: content.substring(0, 30) + '...',
+                        time: publishTime
                     });
 
-                    if (comment.nickname && comment.content) {
-                        result.list.push(comment);
+                    // Only add if we have basic info - using unified schema
+                    if (nickname && content) {
+                        result.list.push(createComment(
+                            avatar,
+                            nickname,
+                            publishTime,
+                            content,
+                            [] // NetEase comments typically don't have nested replies
+                        ));
                     } else {
                         console.warn(`评论 #${index + 1} 数据不完整，跳过`);
                     }
@@ -225,11 +291,13 @@ const NeteaseCrawler = {
         return result;
     },
 
+    // Get full article data (article + comments)
     crawl: () => {
         return NeteaseCrawler.crawlArticle();
     }
 };
 
+// Export for use in content script
 if (typeof window !== 'undefined') {
     window.NeteaseCrawler = NeteaseCrawler;
 }

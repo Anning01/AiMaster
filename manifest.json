@@ -27,6 +27,8 @@
         {
             "matches": ["https://*/*"],
             "js": [
+                "crawlers/schema.js",
+                "crawlers/formatter.js",
                 "crawlers/toutiao.js",
                 "crawlers/baidu.js",
                 "crawlers/pengpai.js",

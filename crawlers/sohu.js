@@ -15,24 +15,20 @@ const SohuCrawler = {
         console.log('当前页面 URL:', window.location.href);
 
         try {
-            const article = {
-                title: '',
-                publishTime: '',
-                author: '',
-                authorUrl: '',
-                source: '',
-                contents: [],
-                images: [],
-                videos: [],
-                commentCount: 0,
-                comments: []
-            };
+            // Create article using unified schema
+            const article = createEmptyArticle();
+            article.url = window.location.href;
 
-            // Extract title
+            // Extract title - using stable elements
             console.log('提取标题...');
-            const titleEl = document.querySelector('.text-title h1');
+            const titleEl = safeQuery(document, [
+                '.text-title h1',
+                'h1[class*="title"]',
+                'h1.title',
+                'h1'
+            ]);
             if (titleEl) {
-                article.title = titleEl.textContent.trim();
+                article.title = cleanText(titleEl.textContent);
                 console.log('标题:', article.title);
             } else {
                 console.warn('未找到标题元素');
@@ -40,31 +36,54 @@ const SohuCrawler = {
 
             // Extract publish time
             console.log('提取元信息...');
-            const timeEl = document.querySelector('#news-time, .time');
+            const timeEl = safeQuery(document, [
+                '#news-time',
+                '.time',
+                '[class*="time"]',
+                'time'
+            ]);
             if (timeEl) {
-                article.publishTime = timeEl.textContent.trim();
+                article.publishTime = formatTime(timeEl.textContent);
                 console.log('发布时间:', article.publishTime);
             } else {
                 console.warn('未找到时间元素');
             }
 
             // Extract source (optional - some pages don't have it)
-            const sourceEl = document.querySelector('[data-role="original-link"]');
+            const sourceEl = safeQuery(document, [
+                '[data-role="original-link"]',
+                '[class*="source"]'
+            ]);
             if (sourceEl) {
-                article.source = sourceEl.textContent.replace('来源:', '').trim();
-                console.log('来源:', article.source);
+                const sourceName = cleanText(sourceEl.textContent.replace('来源:', ''));
+                article.author.nickname = sourceName;
+                if (sourceEl.tagName === 'A') {
+                    article.author.url = normalizeUrl(sourceEl.href);
+                }
+                console.log('来源:', sourceName);
             } else {
                 console.warn('未找到来源元素 (某些页面可能没有来源信息)');
+                // Set default author if no source found
+                article.author.nickname = 'Sohu';
             }
 
-            // Extract article content
+            // Extract article content - support multiple formats
             console.log('提取文章内容...');
-            const contentEl = document.querySelector('#mp-editor, article.article');
+            let contentEl = safeQuery(document, [
+                '#mp-editor',
+                'article.article',
+                '.article-content',
+                '[class*="content"]'
+            ]);
+
             if (contentEl) {
                 console.log('找到内容容器');
 
-                // Extract paragraphs - exclude editor name
-                const paragraphs = contentEl.querySelectorAll('p:not([data-role="editor-name"])');
+                // Extract paragraphs - exclude editor name and return links
+                const paragraphs = safeQueryAll(contentEl, [
+                    'p:not([data-role="editor-name"])',
+                    'p'
+                ]);
                 console.log('找到段落数量:', paragraphs.length);
 
                 paragraphs.forEach((p, index) => {
@@ -74,19 +93,19 @@ const SohuCrawler = {
                         return;
                     }
 
-                    const text = p.textContent.trim();
+                    const text = cleanText(p.textContent);
                     if (text && text.length > 10) {
-                        article.contents.push({
-                            type: 'text',
-                            content: text
-                        });
+                        article.contentList.push(text);
                         console.log(`段落 #${index + 1}:`, text.substring(0, 50) + '...');
                     }
                 });
-                console.log('提取段落数量:', article.contents.length);
+                console.log('提取段落数量:', article.contentList.length);
 
-                // Extract images - only real article images
-                const images = contentEl.querySelectorAll('img');
+                // Extract images - only real article images, using unified format
+                const images = safeQueryAll(contentEl, [
+                    'img:not([src*="preload.png"]):not([src*="icon_"]):not([src*="logo_sohu"])',
+                    'img'
+                ]);
                 console.log('找到图片数量:', images.length);
 
                 images.forEach((img) => {
@@ -97,30 +116,29 @@ const SohuCrawler = {
                         !src.includes('preload.png') &&
                         !src.includes('icon_') &&
                         !src.includes('logo_sohu')) {
-                        article.images.push({
-                            src: src,
-                            alt: img.alt || '',
-                            title: img.title || ''
-                        });
+                        const imageObj = extractImage(img);
+                        if (imageObj && imageObj.src) {
+                            article.imageList.push(imageObj);
+                        }
                     }
                 });
-                console.log('提取图片数量:', article.images.length);
+                console.log('提取图片数量:', article.imageList.length);
 
-                // Extract videos (if any)
-                const videos = contentEl.querySelectorAll('video, iframe[src*="video"]');
+                // Extract videos - using unified format
+                const videos = safeQueryAll(contentEl, [
+                    'video',
+                    'iframe[src*="video"]',
+                    '[class*="video"]'
+                ]);
                 console.log('找到视频数量:', videos.length);
 
                 videos.forEach((video) => {
-                    const src = video.src || video.getAttribute('data-src');
-                    if (src) {
-                        article.videos.push({
-                            src: src,
-                            poster: video.poster || '',
-                            type: video.tagName.toLowerCase()
-                        });
+                    const videoObj = extractVideo(video);
+                    if (videoObj && videoObj.src) {
+                        article.videoList.push(videoObj);
                     }
                 });
-                console.log('提取视频数量:', article.videos.length);
+                console.log('提取视频数量:', article.videoList.length);
             } else {
                 console.error('未找到内容容器');
             }
@@ -129,24 +147,27 @@ const SohuCrawler = {
             console.log('提取评论数据...');
             const commentData = SohuCrawler.crawlComments();
             article.commentCount = commentData.count;
-            article.comments = commentData.list;
+            article.commentList = commentData.list;
             console.log('评论数量:', article.commentCount);
-            console.log('实际提取评论数:', article.comments.length);
+            console.log('实际提取评论数:', article.commentList.length);
 
-            // Validate
-            if (!article.title) {
-                console.error('标题为空，爬取失败');
-                throw new Error('Failed to extract article title');
+            // Validate using unified schema
+            const validation = validateArticle(article);
+            if (!validation.valid) {
+                console.error('数据验证失败:', validation.errors);
+                throw new Error('Article data validation failed: ' + validation.errors.join(', '));
             }
 
             console.log('=== Sohu 爬虫完成 ===');
             console.log('最终数据摘要:', {
+                url: article.url,
                 title: article.title,
-                author: article.author,
-                paragraphs: article.contents.length,
-                images: article.images.length,
-                videos: article.videos.length,
-                comments: article.comments.length
+                author: article.author.nickname,
+                publishTime: article.publishTime,
+                paragraphs: article.contentList.length,
+                images: article.imageList.length,
+                videos: article.videoList.length,
+                comments: article.commentList.length
             });
 
             return article;
@@ -159,7 +180,7 @@ const SohuCrawler = {
         }
     },
 
-    // Extract comments
+    // Extract comments (using unified schema)
     crawlComments: () => {
         console.log('--- 开始提取评论 ---');
 
@@ -170,81 +191,79 @@ const SohuCrawler = {
 
         try {
             // Try to find comment count - use more specific selector
-            const countEl = document.querySelector('.comment-count');
+            const countEl = safeQuery(document, [
+                '.comment-count',
+                '[class*="comment-count"]',
+                '[class*="count"]'
+            ]);
             if (countEl) {
-                const countMatch = countEl.textContent.match(/(\d+)/);
-                if (countMatch) {
-                    result.count = parseInt(countMatch[1]) || 0;
-                    console.log('评论总数:', result.count);
-                }
+                result.count = parseNumber(countEl.textContent);
+                console.log('评论总数:', result.count);
             } else {
                 console.warn('未找到评论计数元素');
             }
 
-            // Find comment items - use specific selector for Sohu
-            const commentItems = document.querySelectorAll('.comment-item[data-v-586d6cf8]');
+            // Find comment items - support multiple formats
+            let commentItems = safeQueryAll(document, [
+                '.comment-item[data-v-586d6cf8]',
+                '.comment-item',
+                '[class*="comment-item"]'
+            ]);
             console.log('找到评论项数量:', commentItems.length);
 
             commentItems.forEach((item, index) => {
                 console.log(`处理评论 #${index + 1}...`);
 
-                const comment = {
-                    avatar: '',
-                    nickname: '',
-                    content: '',
-                    time: '',
-                    location: '',
-                    likes: 0,
-                    replyCount: 0,
-                    replies: []
-                };
+                // Avatar - using unified schema
+                const avatarImg = safeQuery(item, [
+                    '.left img',
+                    'img[class*="avatar"]',
+                    '.avatar img',
+                    'img'
+                ]);
+                const avatar = avatarImg ? normalizeUrl(avatarImg.src) : '';
 
-                // Extract avatar
-                const avatarEl = item.querySelector('.left img');
-                if (avatarEl) {
-                    comment.avatar = avatarEl.src;
-                }
+                // Nickname
+                const nicknameEl = safeQuery(item, [
+                    '.author-area.name span',
+                    '[class*="author"] span',
+                    '[class*="name"]'
+                ]);
+                const nickname = nicknameEl ? cleanText(nicknameEl.textContent) : '';
 
-                // Extract nickname
-                const nicknameEl = item.querySelector('.author-area.name span');
-                if (nicknameEl) {
-                    comment.nickname = nicknameEl.textContent.trim();
-                }
-
-                // Extract time and location
-                const tagEls = item.querySelectorAll('.comment-tag .plain-tag');
+                // Time and location
+                let publishTime = '';
+                const tagEls = safeQueryAll(item, [
+                    '.comment-tag .plain-tag',
+                    '[class*="tag"]'
+                ]);
                 if (tagEls.length >= 1) {
-                    comment.time = tagEls[0].textContent.trim();
-                }
-                if (tagEls.length >= 2) {
-                    comment.location = tagEls[1].textContent.trim();
+                    publishTime = formatTime(tagEls[0].textContent);
                 }
 
-                // Extract content
-                const contentEl = item.querySelector('.comment-content-text');
-                if (contentEl) {
-                    comment.content = contentEl.textContent.trim();
-                }
-
-                // Extract likes
-                const likeEls = item.querySelectorAll('.btn-area .text');
-                if (likeEls.length > 0) {
-                    const likesText = likeEls[0].textContent.trim();
-                    if (likesText && likesText !== '点赞') {
-                        comment.likes = parseInt(likesText) || 0;
-                    }
-                }
+                // Content
+                const contentEl = safeQuery(item, [
+                    '.comment-content-text',
+                    '[class*="content-text"]',
+                    '[class*="content"]'
+                ]);
+                const content = contentEl ? cleanText(contentEl.textContent) : '';
 
                 console.log(`评论 #${index + 1}:`, {
-                    nickname: comment.nickname,
-                    content: comment.content.substring(0, 30) + '...',
-                    location: comment.location,
-                    time: comment.time,
-                    likes: comment.likes
+                    nickname: nickname,
+                    content: content.substring(0, 30) + '...',
+                    time: publishTime
                 });
 
-                if (comment.nickname && comment.content) {
-                    result.list.push(comment);
+                // Only add if we have basic info - using unified schema
+                if (nickname && content) {
+                    result.list.push(createComment(
+                        avatar,
+                        nickname,
+                        publishTime,
+                        content,
+                        [] // Sohu comments typically don't have nested replies
+                    ));
                 } else {
                     console.warn(`评论 #${index + 1} 数据不完整，跳过`);
                 }

@@ -1,0 +1,314 @@
+// Data Formatter Utilities
+// Provides formatting and normalization functions for crawler data
+
+/**
+ * Formats a date/time string to unified format (YYYY-MM-DD HH:MM:SS)
+ * Handles various input formats from different platforms
+ * @param {string} timeStr - Input time string
+ * @returns {string} Formatted time string
+ */
+function formatTime(timeStr) {
+    if (!timeStr) return '';
+
+    try {
+        // Remove common Chinese characters
+        let cleaned = timeStr
+            .replace(/年/g, '-')
+            .replace(/月/g, '-')
+            .replace(/日/g, ' ')
+            .replace(/时/g, ':')
+            .replace(/分/g, ':')
+            .replace(/秒/g, '')
+            .trim();
+
+        // Handle relative time formats
+        const now = new Date();
+
+        // "刚刚", "just now"
+        if (/刚刚|just now/i.test(cleaned)) {
+            return formatDate(now);
+        }
+
+        // "X分钟前", "X minutes ago"
+        const minutesMatch = cleaned.match(/(\d+)\s*分钟前|(\d+)\s*minutes?\s*ago/i);
+        if (minutesMatch) {
+            const minutes = parseInt(minutesMatch[1] || minutesMatch[2]);
+            now.setMinutes(now.getMinutes() - minutes);
+            return formatDate(now);
+        }
+
+        // "X小时前", "X hours ago"
+        const hoursMatch = cleaned.match(/(\d+)\s*小时前|(\d+)\s*hours?\s*ago/i);
+        if (hoursMatch) {
+            const hours = parseInt(hoursMatch[1] || hoursMatch[2]);
+            now.setHours(now.getHours() - hours);
+            return formatDate(now);
+        }
+
+        // "X天前", "X days ago"
+        const daysMatch = cleaned.match(/(\d+)\s*天前|(\d+)\s*days?\s*ago/i);
+        if (daysMatch) {
+            const days = parseInt(daysMatch[1] || daysMatch[2]);
+            now.setDate(now.getDate() - days);
+            return formatDate(now);
+        }
+
+        // "昨天 HH:MM", "yesterday HH:MM"
+        if (/昨天|yesterday/i.test(cleaned)) {
+            const timeMatch = cleaned.match(/(\d{1,2}):(\d{2})/);
+            if (timeMatch) {
+                now.setDate(now.getDate() - 1);
+                now.setHours(parseInt(timeMatch[1]));
+                now.setMinutes(parseInt(timeMatch[2]));
+                now.setSeconds(0);
+                return formatDate(now);
+            }
+        }
+
+        // "今天 HH:MM", "today HH:MM"
+        if (/今天|today/i.test(cleaned)) {
+            const timeMatch = cleaned.match(/(\d{1,2}):(\d{2})/);
+            if (timeMatch) {
+                now.setHours(parseInt(timeMatch[1]));
+                now.setMinutes(parseInt(timeMatch[2]));
+                now.setSeconds(0);
+                return formatDate(now);
+            }
+        }
+
+        // Try to parse as Date
+        const date = new Date(cleaned);
+        if (!isNaN(date.getTime())) {
+            return formatDate(date);
+        }
+
+        // Try ISO format variations
+        const isoMatch = cleaned.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (isoMatch) {
+            const [, year, month, day, hour = '00', minute = '00', second = '00'] = isoMatch;
+            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
+        }
+
+        // If all parsing fails, return cleaned string
+        return cleaned;
+    } catch (error) {
+        console.warn('Time formatting error:', error, 'Input:', timeStr);
+        return timeStr;
+    }
+}
+
+/**
+ * Formats a Date object to string (YYYY-MM-DD HH:MM:SS)
+ * @param {Date} date - Date object
+ * @returns {string} Formatted date string
+ */
+function formatDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+/**
+ * Normalizes URL to absolute URL
+ * @param {string} url - URL string (can be relative or absolute)
+ * @param {string} baseUrl - Base URL for resolving relative URLs (optional)
+ * @returns {string} Absolute URL
+ */
+function normalizeUrl(url, baseUrl = '') {
+    if (!url) return '';
+
+    try {
+        // Already absolute URL
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            return url;
+        }
+
+        // Protocol-relative URL
+        if (url.startsWith('//')) {
+            return 'https:' + url;
+        }
+
+        // Relative URL
+        if (baseUrl) {
+            return new URL(url, baseUrl).href;
+        }
+
+        // Use current page as base
+        if (typeof window !== 'undefined') {
+            return new URL(url, window.location.href).href;
+        }
+
+        return url;
+    } catch (error) {
+        console.warn('URL normalization error:', error, 'Input:', url);
+        return url;
+    }
+}
+
+/**
+ * Cleans and normalizes text content
+ * @param {string} text - Raw text content
+ * @returns {string} Cleaned text
+ */
+function cleanText(text) {
+    if (!text) return '';
+
+    return text
+        .replace(/\s+/g, ' ')           // Normalize whitespace
+        .replace(/\u00A0/g, ' ')         // Replace &nbsp;
+        .trim();
+}
+
+/**
+ * Extracts and formats image data
+ * @param {HTMLImageElement} imgElement - Image element
+ * @param {string} baseUrl - Base URL for relative URLs (optional)
+ * @returns {Object} Image object matching ImageSchema
+ */
+function extractImage(imgElement, baseUrl = '') {
+    if (!imgElement) return null;
+
+    // Try multiple attributes for image source
+    const src = imgElement.src ||
+                imgElement.getAttribute('data-src') ||
+                imgElement.getAttribute('data-original') ||
+                imgElement.getAttribute('data-lazy-src') ||
+                '';
+
+    if (!src) return null;
+
+    return {
+        src: normalizeUrl(src, baseUrl),
+        alt: cleanText(imgElement.alt || imgElement.getAttribute('title') || ''),
+        width: parseInt(imgElement.width) || 0,
+        height: parseInt(imgElement.height) || 0
+    };
+}
+
+/**
+ * Extracts and formats video data
+ * @param {HTMLVideoElement|HTMLElement} videoElement - Video or iframe element
+ * @param {string} baseUrl - Base URL for relative URLs (optional)
+ * @returns {Object} Video object matching VideoSchema
+ */
+function extractVideo(videoElement, baseUrl = '') {
+    if (!videoElement) return null;
+
+    let src = '';
+    let poster = '';
+    let duration = 0;
+    let title = '';
+
+    if (videoElement.tagName === 'VIDEO') {
+        src = videoElement.src || videoElement.getAttribute('data-src') || '';
+        poster = videoElement.poster || '';
+        duration = parseInt(videoElement.duration) || 0;
+        title = videoElement.getAttribute('title') || '';
+    } else if (videoElement.tagName === 'IFRAME') {
+        src = videoElement.src || '';
+        title = videoElement.getAttribute('title') || '';
+    } else {
+        // Try to find source element
+        const sourceEl = videoElement.querySelector('source');
+        if (sourceEl) {
+            src = sourceEl.src || sourceEl.getAttribute('data-src') || '';
+        }
+    }
+
+    if (!src) return null;
+
+    return {
+        src: normalizeUrl(src, baseUrl),
+        poster: normalizeUrl(poster, baseUrl),
+        duration: duration,
+        title: cleanText(title)
+    };
+}
+
+/**
+ * Safe element query - tries multiple selectors
+ * @param {Element} parent - Parent element to query
+ * @param {string|Array} selectors - Single selector or array of selectors
+ * @returns {Element|null} First matching element or null
+ */
+function safeQuery(parent, selectors) {
+    if (!parent) return null;
+
+    const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+
+    for (const selector of selectorArray) {
+        try {
+            const element = parent.querySelector(selector);
+            if (element) return element;
+        } catch (error) {
+            console.warn('Query selector error:', error, 'Selector:', selector);
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Safe element query all - tries multiple selectors
+ * @param {Element} parent - Parent element to query
+ * @param {string|Array} selectors - Single selector or array of selectors
+ * @returns {Array} Array of matching elements
+ */
+function safeQueryAll(parent, selectors) {
+    if (!parent) return [];
+
+    const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+
+    for (const selector of selectorArray) {
+        try {
+            const elements = parent.querySelectorAll(selector);
+            if (elements.length > 0) return Array.from(elements);
+        } catch (error) {
+            console.warn('Query selector error:', error, 'Selector:', selector);
+        }
+    }
+
+    return [];
+}
+
+/**
+ * Parses number from text (handles Chinese characters)
+ * @param {string} text - Text containing number
+ * @returns {number} Parsed number or 0
+ */
+function parseNumber(text) {
+    if (!text) return 0;
+
+    // Remove Chinese characters and whitespace
+    const cleaned = text.replace(/[^\d.]/g, '');
+    const num = parseFloat(cleaned);
+
+    // Handle Chinese number suffixes
+    if (text.includes('万')) {
+        return Math.floor(num * 10000);
+    } else if (text.includes('千')) {
+        return Math.floor(num * 1000);
+    } else if (text.includes('百')) {
+        return Math.floor(num * 100);
+    }
+
+    return Math.floor(num) || 0;
+}
+
+// Export for use in other modules
+if (typeof window !== 'undefined') {
+    window.formatTime = formatTime;
+    window.formatDate = formatDate;
+    window.normalizeUrl = normalizeUrl;
+    window.cleanText = cleanText;
+    window.extractImage = extractImage;
+    window.extractVideo = extractVideo;
+    window.safeQuery = safeQuery;
+    window.safeQueryAll = safeQueryAll;
+    window.parseNumber = parseNumber;
+}

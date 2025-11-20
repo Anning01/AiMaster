@@ -15,23 +15,20 @@ const PengpaiCrawler = {
         console.log('当前页面 URL:', window.location.href);
 
         try {
-            const article = {
-                title: '',
-                publishTime: '',
-                author: '',
-                source: '',
-                contents: [],
-                images: [],
-                videos: [],
-                commentCount: 0,
-                comments: []
-            };
+            // Create article using unified schema
+            const article = createEmptyArticle();
+            article.url = window.location.href;
 
-            // Extract title
+            // Extract title - using stable elements
             console.log('提取标题...');
-            const titleEl = document.querySelector('h1.index_title__B8mhI');
+            const titleEl = safeQuery(document, [
+                'h1.index_title__B8mhI',
+                'h1[class*="title"]',
+                'h1.title',
+                'h1'
+            ]);
             if (titleEl) {
-                article.title = titleEl.textContent.trim();
+                article.title = cleanText(titleEl.textContent);
                 console.log('标题:', article.title);
             } else {
                 console.warn('未找到标题元素');
@@ -39,71 +36,96 @@ const PengpaiCrawler = {
 
             // Extract author
             console.log('提取作者信息...');
-            const authorEl = document.querySelector('.index_left__LfzyH > div:first-child');
+            const authorEl = safeQuery(document, [
+                '.index_left__LfzyH > div:first-child',
+                '[class*="author"]',
+                '[class*="left"] > div:first-child'
+            ]);
             if (authorEl) {
-                article.author = authorEl.textContent.trim();
-                console.log('作者:', article.author);
+                article.author.nickname = cleanText(authorEl.textContent);
+                console.log('作者:', article.author.nickname);
             }
 
             // Extract publish time and source
-            const timeEl = document.querySelector('.ant-space-item span');
+            console.log('提取元信息...');
+            const timeEl = safeQuery(document, [
+                '.ant-space-item span',
+                '[class*="space-item"] span',
+                '[class*="time"]',
+                'time'
+            ]);
             if (timeEl) {
-                article.publishTime = timeEl.textContent.trim();
+                article.publishTime = formatTime(timeEl.textContent);
                 console.log('发布时间:', article.publishTime);
             }
 
-            const sourceEl = document.querySelector('.ant-space-item:nth-child(2) span');
+            const sourceEl = safeQuery(document, [
+                '.ant-space-item:nth-child(2) span',
+                '[class*="source"]'
+            ]);
             if (sourceEl) {
-                article.source = sourceEl.textContent.trim().replace('来源：', '');
-                console.log('来源:', article.source);
+                const sourceName = cleanText(sourceEl.textContent.replace('来源：', ''));
+                console.log('来源:', sourceName);
             }
 
             // Extract article content
             console.log('提取文章内容...');
-            const contentEl = document.querySelector('.index_cententWrap__Jv8jK');
+            const contentEl = safeQuery(document, [
+                '.index_cententWrap__Jv8jK',
+                '[class*="contentWrap"]',
+                '[class*="content"]',
+                'article'
+            ]);
+
             if (contentEl) {
                 console.log('找到内容容器');
 
-                // Extract paragraphs
-                const paragraphs = contentEl.querySelectorAll('p');
+                // Extract paragraphs - using unified format
+                const paragraphs = safeQueryAll(contentEl, [
+                    'p:not(.image_desc)',
+                    'p'
+                ]);
                 console.log('找到段落数量:', paragraphs.length);
 
                 paragraphs.forEach((p, index) => {
-                    const text = p.textContent.trim();
-                    if (text && !p.classList.contains('image_desc')) {
-                        article.contents.push({
-                            type: 'text',
-                            content: text
-                        });
+                    const text = cleanText(p.textContent);
+                    if (text && !p.classList.contains('image_desc') && text.length > 0) {
+                        article.contentList.push(text);
+                        console.log(`段落 #${index + 1}:`, text.substring(0, 50) + '...');
                     }
                 });
-                console.log('提取段落数量:', article.contents.length);
+                console.log('提取段落数量:', article.contentList.length);
 
-                // Extract images
-                const images = contentEl.querySelectorAll('img');
+                // Extract images - using unified format
+                const images = safeQueryAll(contentEl, [
+                    'img',
+                    'img[data-imageid]'
+                ]);
                 console.log('找到图片数量:', images.length);
 
                 images.forEach((img) => {
-                    article.images.push({
-                        src: img.src || img.getAttribute('data-src') || '',
-                        alt: img.alt || '',
-                        imageId: img.getAttribute('data-imageid') || ''
-                    });
+                    const imageObj = extractImage(img);
+                    if (imageObj && imageObj.src) {
+                        article.imageList.push(imageObj);
+                    }
                 });
-                console.log('提取图片数量:', article.images.length);
+                console.log('提取图片数量:', article.imageList.length);
 
-                // Extract videos (if any)
-                const videos = contentEl.querySelectorAll('video, iframe[src*="video"]');
+                // Extract videos - using unified format
+                const videos = safeQueryAll(contentEl, [
+                    'video',
+                    'iframe[src*="video"]',
+                    '[class*="video"]'
+                ]);
                 console.log('找到视频数量:', videos.length);
 
                 videos.forEach((video) => {
-                    article.videos.push({
-                        src: video.src || video.getAttribute('data-src') || '',
-                        poster: video.poster || '',
-                        type: video.tagName.toLowerCase()
-                    });
+                    const videoObj = extractVideo(video);
+                    if (videoObj && videoObj.src) {
+                        article.videoList.push(videoObj);
+                    }
                 });
-                console.log('提取视频数量:', article.videos.length);
+                console.log('提取视频数量:', article.videoList.length);
             } else {
                 console.error('未找到内容容器 (.index_cententWrap__Jv8jK)');
             }
@@ -112,24 +134,27 @@ const PengpaiCrawler = {
             console.log('提取评论数据...');
             const commentData = PengpaiCrawler.crawlComments();
             article.commentCount = commentData.count;
-            article.comments = commentData.list;
+            article.commentList = commentData.list;
             console.log('评论数量:', article.commentCount);
-            console.log('实际提取评论数:', article.comments.length);
+            console.log('实际提取评论数:', article.commentList.length);
 
-            // Validate
-            if (!article.title) {
-                console.error('标题为空，爬取失败');
-                throw new Error('Failed to extract article title');
+            // Validate using unified schema
+            const validation = validateArticle(article);
+            if (!validation.valid) {
+                console.error('数据验证失败:', validation.errors);
+                throw new Error('Article data validation failed: ' + validation.errors.join(', '));
             }
 
             console.log('=== Pengpai 爬虫完成 ===');
             console.log('最终数据摘要:', {
+                url: article.url,
                 title: article.title,
-                author: article.author,
-                paragraphs: article.contents.length,
-                images: article.images.length,
-                videos: article.videos.length,
-                comments: article.comments.length
+                author: article.author.nickname,
+                publishTime: article.publishTime,
+                paragraphs: article.contentList.length,
+                images: article.imageList.length,
+                videos: article.videoList.length,
+                comments: article.commentList.length
             });
 
             return article;
@@ -142,7 +167,7 @@ const PengpaiCrawler = {
         }
     },
 
-    // Extract comments
+    // Extract comments (using unified schema)
     crawlComments: () => {
         console.log('--- 开始提取评论 ---');
 
@@ -153,7 +178,11 @@ const PengpaiCrawler = {
 
         try {
             // Get comment count
-            const countEl = document.querySelector('.index_commentNumSpan__jE6dy');
+            const countEl = safeQuery(document, [
+                '.index_commentNumSpan__jE6dy',
+                '[class*="commentNumSpan"]',
+                '[class*="comment-count"]'
+            ]);
             if (countEl) {
                 const countText = countEl.textContent.trim();
                 const countMatch = countText.match(/\((\d+)\)/);
@@ -166,82 +195,83 @@ const PengpaiCrawler = {
             }
 
             // Get comment list
-            const commentItems = document.querySelectorAll('.ant-comment.index_costomComment__b6gaa');
+            const commentItems = safeQueryAll(document, [
+                '.ant-comment.index_costomComment__b6gaa',
+                '.ant-comment',
+                '[class*="comment"]'
+            ]);
             console.log('找到评论项数量:', commentItems.length);
 
             commentItems.forEach((item, index) => {
                 console.log(`处理评论 #${index + 1}...`);
 
-                const comment = {
-                    userId: '',
-                    userUrl: '',
-                    avatar: '',
-                    nickname: '',
-                    content: '',
-                    time: '',
-                    address: '',
-                    likes: 0,
-                    replyCount: 0,
-                    replies: []
-                };
-
                 // User info and avatar
-                const userLink = item.querySelector('a[href*="/user_"]');
+                let avatar = '';
+                let userUrl = '';
+                const userLink = safeQuery(item, [
+                    'a[href*="/user_"]',
+                    '[class*="avatar"] a',
+                    'a'
+                ]);
                 if (userLink) {
-                    comment.userUrl = userLink.href;
-                    const userIdMatch = userLink.href.match(/\/user_(\d+)/);
-                    if (userIdMatch) {
-                        comment.userId = userIdMatch[1];
-                    }
+                    userUrl = normalizeUrl(userLink.href);
 
-                    const avatarImg = userLink.querySelector('.ant-avatar img');
+                    const avatarImg = safeQuery(userLink, [
+                        '.ant-avatar img',
+                        'img[class*="avatar"]',
+                        'img'
+                    ]);
                     if (avatarImg) {
-                        comment.avatar = avatarImg.src;
+                        avatar = normalizeUrl(avatarImg.src);
                     }
                 }
 
                 // Nickname
-                const nicknameEl = item.querySelector('.ant-comment-content-author-name a');
-                if (nicknameEl) {
-                    comment.nickname = nicknameEl.textContent.trim();
-                }
+                const nicknameEl = safeQuery(item, [
+                    '.ant-comment-content-author-name a',
+                    '[class*="author-name"] a',
+                    '[class*="nickname"]'
+                ]);
+                const nickname = nicknameEl ? cleanText(nicknameEl.textContent) : '';
 
                 // Content
-                const contentEl = item.querySelector('.index_content__g237N');
-                if (contentEl) {
-                    comment.content = contentEl.textContent.trim();
-                }
+                const contentEl = safeQuery(item, [
+                    '.index_content__g237N',
+                    '[class*="content"]',
+                    '.ant-comment-content-detail'
+                ]);
+                const content = contentEl ? cleanText(contentEl.textContent) : '';
 
                 // Time and address
-                const timeAddressEl = item.querySelector('.ant-space-item div');
+                let publishTime = '';
+                const timeAddressEl = safeQuery(item, [
+                    '.ant-space-item div',
+                    '[class*="space-item"] div',
+                    '[class*="time"]'
+                ]);
                 if (timeAddressEl) {
                     const timeAddressText = timeAddressEl.textContent.trim();
                     const parts = timeAddressText.split(' ∙ ');
                     if (parts.length > 0) {
-                        comment.time = parts[0];
+                        publishTime = formatTime(parts[0]);
                     }
-                    if (parts.length > 1) {
-                        comment.address = parts[1];
-                    }
-                }
-
-                // Likes
-                const likeEl = item.querySelector('.index_num__aeCCB');
-                if (likeEl) {
-                    const likesText = likeEl.textContent.trim();
-                    comment.likes = parseInt(likesText) || 0;
                 }
 
                 console.log(`评论 #${index + 1}:`, {
-                    nickname: comment.nickname,
-                    content: comment.content.substring(0, 30) + '...',
-                    time: comment.time,
-                    likes: comment.likes
+                    nickname: nickname,
+                    content: content.substring(0, 30) + '...',
+                    time: publishTime
                 });
 
-                // Only add if we have basic info
-                if (comment.nickname && comment.content) {
-                    result.list.push(comment);
+                // Only add if we have basic info - using unified schema
+                if (nickname && content) {
+                    result.list.push(createComment(
+                        avatar,
+                        nickname,
+                        publishTime,
+                        content,
+                        [] // Pengpai comments typically don't have nested replies
+                    ));
                 } else {
                     console.warn(`评论 #${index + 1} 数据不完整，跳过`);
                 }

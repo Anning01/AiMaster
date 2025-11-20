@@ -102,7 +102,7 @@ async function handleCrawl() {
             if (result.ok) {
                 const data = await result.json();
                 console.log('后端响应数据:', data);
-                alert('文章已提交处理！任务ID: ' + data.taskId);
+                alert('文章已提交处理！任务ID: ' + data.task_id);
                 await loadTasks();
             } else {
                 const errorText = await result.text();
@@ -212,10 +212,10 @@ function renderTasks(tasks) {
 }
 
 // 处理发布
-window.handlePublish = async function(taskId, targetPlatform) {
+window.handlePublish = async function(task_id, targetPlatform) {
     try {
         // 获取任务详情
-        const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`);
+        const response = await fetch(`${API_BASE_URL}/api/tasks/${task_id}`);
         if (!response.ok) {
             throw new Error('获取任务详情失败');
         }

@@ -143,7 +143,7 @@ AiMaster/
 ```json
 {
   "success": true,
-  "taskId": "task_123",
+  "task_id": 1,
   "message": "任务已创建"
 }
 ```
@@ -165,7 +165,7 @@ AiMaster/
 ]
 ```
 
-### GET /api/tasks/:taskId
+### GET /api/tasks/:task_id
 获取任务详情
 
 **响应：**

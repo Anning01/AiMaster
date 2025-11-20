@@ -15,23 +15,20 @@ const TencentCrawler = {
         console.log('当前页面 URL:', window.location.href);
 
         try {
-            const article = {
-                title: '',
-                publishTime: '',
-                author: '',
-                source: '',
-                contents: [],
-                images: [],
-                videos: [],
-                commentCount: 0,
-                comments: []
-            };
+            // Create article using unified schema
+            const article = createEmptyArticle();
+            article.url = window.location.href;
 
-            // Extract title
+            // Extract title - using stable elements
             console.log('提取标题...');
-            const titleEl = document.querySelector('.content-article h1');
+            const titleEl = safeQuery(document, [
+                '.content-article h1',
+                'h1[class*="title"]',
+                'h1.title',
+                'h1'
+            ]);
             if (titleEl) {
-                article.title = titleEl.textContent.trim();
+                article.title = cleanText(titleEl.textContent);
                 console.log('标题:', article.title);
             } else {
                 console.warn('未找到标题元素');
@@ -39,21 +36,47 @@ const TencentCrawler = {
 
             // Extract author and publish time
             console.log('提取元信息...');
-            const authorInfoEl = document.querySelector('#article-author');
+            const authorInfoEl = safeQuery(document, [
+                '#article-author',
+                '[class*="author-info"]',
+                '[class*="article-info"]'
+            ]);
+
             if (authorInfoEl) {
                 // Extract author
-                const authorNameEl = authorInfoEl.querySelector('.media-name');
+                const authorNameEl = safeQuery(authorInfoEl, [
+                    '.media-name',
+                    '[class*="media-name"]',
+                    '[class*="author-name"]'
+                ]);
                 if (authorNameEl) {
-                    article.author = authorNameEl.textContent.trim();
-                    console.log('作者:', article.author);
+                    article.author.nickname = cleanText(authorNameEl.textContent);
+                    console.log('作者:', article.author.nickname);
+                }
+
+                // Extract author avatar
+                const avatarImg = safeQuery(authorInfoEl, [
+                    'img[class*="avatar"]',
+                    '.avatar img',
+                    'img'
+                ]);
+                if (avatarImg) {
+                    article.author.avatar = normalizeUrl(avatarImg.src);
                 }
 
                 // Extract publish time from media-meta
-                const metaEl = authorInfoEl.querySelector('.media-meta');
+                const metaEl = safeQuery(authorInfoEl, [
+                    '.media-meta',
+                    '[class*="meta"]'
+                ]);
                 if (metaEl) {
-                    const timeSpan = metaEl.querySelector('span:first-child');
+                    const timeSpan = safeQuery(metaEl, [
+                        'span:first-child',
+                        'span',
+                        '[class*="time"]'
+                    ]);
                     if (timeSpan) {
-                        article.publishTime = timeSpan.textContent.trim();
+                        article.publishTime = formatTime(timeSpan.textContent);
                         console.log('发布时间:', article.publishTime);
                     }
                 }
@@ -63,12 +86,18 @@ const TencentCrawler = {
 
             // Extract article content
             console.log('提取文章内容...');
-            const contentEl = document.querySelector('#article-content');
+            const contentEl = safeQuery(document, [
+                '#article-content',
+                '[class*="article-content"]',
+                '.content-article',
+                'article'
+            ]);
+
             if (contentEl) {
                 console.log('找到内容容器');
 
                 // Extract paragraphs - directly find all <p> tags with text content
-                const allParagraphs = contentEl.querySelectorAll('p');
+                const allParagraphs = safeQueryAll(contentEl, ['p']);
                 console.log('找到p标签数量:', allParagraphs.length);
 
                 allParagraphs.forEach((p, index) => {
@@ -86,53 +115,62 @@ const TencentCrawler = {
                     }
 
                     // Get text content
-                    const text = p.textContent.trim();
+                    const text = cleanText(p.textContent);
 
                     if (text && text.length > 10) {
-                        article.contents.push({
-                            type: 'text',
-                            content: text
-                        });
+                        article.contentList.push(text);
                         console.log(`段落 #${index + 1}:`, text.substring(0, 50) + '...');
                     }
                 });
-                console.log('提取段落数量:', article.contents.length);
+                console.log('提取段落数量:', article.contentList.length);
 
                 // Extract images - only article images, not UI elements
-                const images = contentEl.querySelectorAll('img.qnt-img-img, img.qnr-img-lazy-load-img');
+                const images = safeQueryAll(contentEl, [
+                    'img.qnt-img-img',
+                    'img.qnr-img-lazy-load-img',
+                    'img:not([class*="loading"])'
+                ]);
                 console.log('找到图片数量:', images.length);
 
                 images.forEach((img) => {
                     const src = img.getAttribute('data-src') || img.src;
                     // Skip small images and UI elements
                     if (src && !src.includes('newsapp_bt/0/') && !src.includes('loading')) {
-                        article.images.push({
-                            src: src,
-                            alt: img.alt || '',
-                            title: img.title || ''
-                        });
+                        const imageObj = extractImage(img);
+                        if (imageObj && imageObj.src) {
+                            article.imageList.push(imageObj);
+                        }
                     }
                 });
-                console.log('提取图片数量:', article.images.length);
+                console.log('提取图片数量:', article.imageList.length);
 
                 // Extract videos - look for video tags in video player containers
-                const videoContainers = contentEl.querySelectorAll('.videoPlayer');
+                const videoContainers = safeQueryAll(contentEl, [
+                    '.videoPlayer',
+                    '[class*="video-player"]',
+                    '[class*="video"]'
+                ]);
                 console.log('找到视频容器数量:', videoContainers.length);
 
                 videoContainers.forEach((container) => {
-                    const video = container.querySelector('video');
+                    const video = safeQuery(container, ['video', 'iframe']);
                     if (video) {
-                        const posterImg = container.querySelector('img.txp_poster_img');
-                        const videoId = container.id || '';
-
-                        article.videos.push({
-                            id: videoId,
-                            poster: posterImg ? posterImg.src : '',
-                            type: 'video'
-                        });
+                        const videoObj = extractVideo(video);
+                        if (videoObj && videoObj.src) {
+                            // Try to get poster from container
+                            const posterImg = safeQuery(container, [
+                                'img.txp_poster_img',
+                                'img[class*="poster"]',
+                                'img'
+                            ]);
+                            if (posterImg && posterImg.src) {
+                                videoObj.poster = normalizeUrl(posterImg.src);
+                            }
+                            article.videoList.push(videoObj);
+                        }
                     }
                 });
-                console.log('提取视频数量:', article.videos.length);
+                console.log('提取视频数量:', article.videoList.length);
             } else {
                 console.error('未找到内容容器 (#article-content)');
             }
@@ -141,24 +179,27 @@ const TencentCrawler = {
             console.log('提取评论数据...');
             const commentData = TencentCrawler.crawlComments();
             article.commentCount = commentData.count;
-            article.comments = commentData.list;
+            article.commentList = commentData.list;
             console.log('评论数量:', article.commentCount);
-            console.log('实际提取评论数:', article.comments.length);
+            console.log('实际提取评论数:', article.commentList.length);
 
-            // Validate
-            if (!article.title) {
-                console.error('标题为空，爬取失败');
-                throw new Error('Failed to extract article title');
+            // Validate using unified schema
+            const validation = validateArticle(article);
+            if (!validation.valid) {
+                console.error('数据验证失败:', validation.errors);
+                throw new Error('Article data validation failed: ' + validation.errors.join(', '));
             }
 
             console.log('=== Tencent 爬虫完成 ===');
             console.log('最终数据摘要:', {
+                url: article.url,
                 title: article.title,
-                author: article.author,
-                paragraphs: article.contents.length,
-                images: article.images.length,
-                videos: article.videos.length,
-                comments: article.comments.length
+                author: article.author.nickname,
+                publishTime: article.publishTime,
+                paragraphs: article.contentList.length,
+                images: article.imageList.length,
+                videos: article.videoList.length,
+                comments: article.commentList.length
             });
 
             return article;
@@ -171,7 +212,7 @@ const TencentCrawler = {
         }
     },
 
-    // Extract comments
+    // Extract comments (using unified schema)
     crawlComments: () => {
         console.log('--- 开始提取评论 ---');
 
@@ -182,27 +223,32 @@ const TencentCrawler = {
 
         try {
             // Find comment container
-            const commentContainer = document.querySelector('#qqcom-comment');
+            const commentContainer = safeQuery(document, [
+                '#qqcom-comment',
+                '[class*="qqcom-comment"]',
+                '[class*="comment"]'
+            ]);
 
             if (commentContainer) {
                 console.log('找到评论容器');
 
                 // Try to find comment count
-                const countEl = commentContainer.querySelector('.qqcom-comment-count span');
+                const countEl = safeQuery(commentContainer, [
+                    '.qqcom-comment-count span',
+                    '[class*="comment-count"] span',
+                    '[class*="count"]'
+                ]);
                 if (countEl) {
-                    const countText = countEl.textContent.trim();
-                    const countMatch = countText.match(/评论\s*(\d+)/);
-                    if (countMatch) {
-                        result.count = parseInt(countMatch[1]) || 0;
-                        console.log('评论总数:', result.count);
-                    }
+                    result.count = parseNumber(countEl.textContent);
+                    console.log('评论总数:', result.count);
                 } else {
                     console.warn('未找到评论计数元素');
                 }
 
-                // Get only top-level comment items (direct children of #qqcom-comment)
+                // Get only top-level comment items (direct children)
                 const topLevelCommentItems = Array.from(commentContainer.children).filter(el =>
-                    el.classList.contains('qqcom-comment-item')
+                    el.classList.contains('qqcom-comment-item') ||
+                    el.className.includes('comment-item')
                 );
                 console.log('找到顶级评论项数量:', topLevelCommentItems.length);
 
@@ -210,7 +256,11 @@ const TencentCrawler = {
                     console.log(`处理顶级评论 #${index + 1}...`);
 
                     // Extract the main comment
-                    const mainCommentEl = commentItem.querySelector(':scope > .qnc-comment');
+                    const mainCommentEl = safeQuery(commentItem, [
+                        ':scope > .qnc-comment',
+                        '.qnc-comment',
+                        '[class*="comment"]'
+                    ]);
                     if (!mainCommentEl) {
                         console.warn(`评论项 #${index + 1} 没有主评论元素`);
                         return;
@@ -220,20 +270,40 @@ const TencentCrawler = {
 
                     if (comment.nickname && comment.content) {
                         // Extract replies (sub-comments)
-                        const subCommentContainer = commentItem.querySelector('.qqcom-sub-comment');
+                        const children = [];
+                        const subCommentContainer = safeQuery(commentItem, [
+                            '.qqcom-sub-comment',
+                            '[class*="sub-comment"]'
+                        ]);
                         if (subCommentContainer) {
-                            const replyItems = subCommentContainer.querySelectorAll(':scope > .qqcom-comment-item > .qnc-comment');
+                            const replyItems = safeQueryAll(subCommentContainer, [
+                                ':scope > .qqcom-comment-item > .qnc-comment',
+                                '.qnc-comment',
+                                '[class*="comment"]'
+                            ]);
                             console.log(`  评论 #${index + 1} 有 ${replyItems.length} 条回复`);
 
                             replyItems.forEach((replyEl, replyIndex) => {
                                 const reply = extractCommentData(replyEl, `${index + 1}.${replyIndex + 1}`);
                                 if (reply.nickname && reply.content) {
-                                    comment.replies.push(reply);
+                                    children.push(createComment(
+                                        reply.avatar,
+                                        reply.nickname,
+                                        reply.publishTime,
+                                        reply.content,
+                                        [] // No nested replies beyond this level
+                                    ));
                                 }
                             });
                         }
 
-                        result.list.push(comment);
+                        result.list.push(createComment(
+                            comment.avatar,
+                            comment.nickname,
+                            comment.publishTime,
+                            comment.content,
+                            children
+                        ));
                     } else {
                         console.warn(`评论 #${index + 1} 数据不完整，跳过`);
                     }
@@ -244,7 +314,7 @@ const TencentCrawler = {
 
             console.log('--- 评论提取完成 ---');
             console.log('成功提取评论数:', result.list.length);
-            const totalReplies = result.list.reduce((sum, c) => sum + c.replies.length, 0);
+            const totalReplies = result.list.reduce((sum, c) => sum + c.children.length, 0);
             console.log('成功提取回复数:', totalReplies);
 
         } catch (error) {
@@ -259,6 +329,7 @@ const TencentCrawler = {
         return result;
     },
 
+    // Get full article data (article + comments)
     crawl: () => {
         return TencentCrawler.crawlArticle();
     }
@@ -270,75 +341,67 @@ function extractCommentData(commentEl, index) {
         avatar: '',
         nickname: '',
         content: '',
-        time: '',
-        location: '',
-        likes: 0,
-        replyCount: 0,
-        replies: []
+        publishTime: ''
     };
 
     // Avatar
-    const avatarImg = commentEl.querySelector('.qnt-author-info-author-img');
+    const avatarImg = safeQuery(commentEl, [
+        '.qnt-author-info-author-img',
+        'img[class*="avatar"]',
+        '.avatar img',
+        'img'
+    ]);
     if (avatarImg) {
-        comment.avatar = avatarImg.src;
+        comment.avatar = normalizeUrl(avatarImg.src);
     }
 
     // Nickname
-    const nicknameEl = commentEl.querySelector('.qnc-comment__nickname');
+    const nicknameEl = safeQuery(commentEl, [
+        '.qnc-comment__nickname',
+        '[class*="nickname"]',
+        '[class*="name"]'
+    ]);
     if (nicknameEl) {
-        comment.nickname = nicknameEl.textContent.trim();
+        comment.nickname = cleanText(nicknameEl.textContent);
     }
 
     // Content
-    const contentEl = commentEl.querySelector('.qnc-emoji-text-parser.qnc-comment__content');
+    const contentEl = safeQuery(commentEl, [
+        '.qnc-emoji-text-parser.qnc-comment__content',
+        '.qnc-comment__content',
+        '[class*="content"]'
+    ]);
     if (contentEl) {
-        comment.content = contentEl.textContent.trim();
+        comment.content = cleanText(contentEl.textContent);
     }
 
     // Time and location
-    const timeLocationEl = commentEl.querySelector('.qnc-comment__time-location');
+    const timeLocationEl = safeQuery(commentEl, [
+        '.qnc-comment__time-location',
+        '[class*="time-location"]',
+        '[class*="time"]'
+    ]);
     if (timeLocationEl) {
-        const timeLocationText = timeLocationEl.querySelector('.qnc-comment__time-location-text');
-        if (timeLocationText) {
-            comment.location = timeLocationText.textContent.trim();
-        }
-
-        // Time is after the location
+        // Time is usually after the location, separated by • or ·
         const fullText = timeLocationEl.textContent.trim();
         const parts = fullText.split(/[•·]/);
         if (parts.length > 1) {
-            comment.time = parts[parts.length - 1].trim();
-        }
-    }
-
-    // Likes
-    const likeEl = commentEl.querySelector('.qnc-comment__like-count');
-    if (likeEl) {
-        const likesText = likeEl.textContent.trim();
-        comment.likes = parseInt(likesText) || 0;
-    }
-
-    // Reply count (for top-level comments)
-    const replyCountEl = commentEl.querySelector('.qqcom-comment-reply-num');
-    if (replyCountEl) {
-        const replyText = replyCountEl.textContent.trim();
-        const replyMatch = replyText.match(/(\d+)/);
-        if (replyMatch) {
-            comment.replyCount = parseInt(replyMatch[1]) || 0;
+            comment.publishTime = formatTime(parts[parts.length - 1].trim());
+        } else {
+            comment.publishTime = formatTime(fullText);
         }
     }
 
     console.log(`  评论 ${index}:`, {
         nickname: comment.nickname,
         content: comment.content.substring(0, 30) + '...',
-        location: comment.location,
-        time: comment.time,
-        likes: comment.likes
+        time: comment.publishTime
     });
 
     return comment;
 }
 
+// Export for use in content script
 if (typeof window !== 'undefined') {
     window.TencentCrawler = TencentCrawler;
 }
