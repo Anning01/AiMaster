@@ -88,7 +88,6 @@ const BaiduCrawler = {
                 'article',
                 '.article-content'
             ]);
-            console.log(contentEl);
             
             if (contentEl) {
                 console.log('找到内容容器');

@@ -8,7 +8,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         console.log('AiMaster installed');
         // Set default configuration
         chrome.storage.local.set({
-            apiBaseUrl: 'http://localhost:8000',
+            apiBaseUrl: 'http://192.168.10.37:8000',
             username: 'admin'
         });
     } else if (details.reason === 'update') {
