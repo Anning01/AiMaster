@@ -259,92 +259,80 @@ const NeteaseCrawler = {
         };
 
         try {
-            // NetEase comments are often loaded dynamically
-            const commentContainer = safeQuery(document, [
-                '#comment',
-                '.comment-list',
-                '[class*="comment"]'
-            ]);
+            // NetEase comments use specific structure: .single-tie
+            // Try to find comment count from tie-actCount links
+            const countEls = document.querySelectorAll('.tie-actCount');
+            if (countEls.length > 0) {
+                // First is "跟贴", second is "参与"
+                result.count = parseNumber(countEls[0].textContent);
+                console.log('评论总数:', result.count);
+            } else {
+                console.warn('未找到评论计数元素');
+            }
 
-            if (commentContainer) {
-                // Try to find comment count
-                const countEl = safeQuery(commentContainer, [
-                    '[class*="count"]',
-                    '[class*="total"]',
-                    '.title span'
+            // Find comment items - NetEase uses .single-tie
+            const commentItems = Array.from(document.querySelectorAll('.single-tie'));
+            console.log('找到评论项数量:', commentItems.length);
+
+            commentItems.forEach((item, index) => {
+                console.log(`处理评论 #${index + 1}...`);
+
+                // Avatar - in .photo img
+                const avatarImg = safeQuery(item, [
+                    '.photo img',
+                    '.photo-link img',
+                    'img'
                 ]);
-                if (countEl) {
-                    result.count = parseNumber(countEl.textContent);
-                    console.log('评论总数:', result.count);
-                } else {
-                    console.warn('未找到评论计数元素');
+                const avatar = avatarImg ? normalizeUrl(avatarImg.src) : '';
+
+                // Nickname - in .tie-author .name (direct child, not nested)
+                const nicknameEl = safeQuery(item, [
+                    '.tie-bdy > .bdy-inner > .tie-author .name',
+                    '.tie-author > .f-lft > .name'
+                ]);
+                const nickname = nicknameEl ? cleanText(nicknameEl.textContent) : '';
+
+                // Content - use direct child .tie-cnt to avoid nested floor comments
+                // Query from .tie-bdy > .bdy-inner to get only top-level content
+                const bdyInner = safeQuery(item, ['.tie-bdy > .bdy-inner', '.bdy-inner']);
+                let content = '';
+                if (bdyInner) {
+                    // Get only the direct .tie-cnt child (not inside .floor-tie)
+                    const contentEl = safeQuery(bdyInner, [
+                        '.bdy-inner > .tie-cnt',
+                        'p.tie-cnt.js-tie-content'
+                    ]);
+                    if (contentEl) {
+                        content = cleanText(contentEl.textContent);
+                    }
                 }
 
-                // Try to find comment items
-                const commentItems = safeQueryAll(commentContainer, [
-                    '[class*="item"]',
-                    'li',
-                    '[class*="comment"]'
+                // Time - in .tie-time
+                const timeEl = safeQuery(item, [
+                    '.tie-time',
+                    '[class*="time"]'
                 ]);
-                console.log('找到评论项数量:', commentItems.length);
+                const publishTime = timeEl ? formatTime(timeEl.textContent) : '';
 
-                commentItems.forEach((item, index) => {
-                    console.log(`处理评论 #${index + 1}...`);
-
-                    // Avatar
-                    const avatarImg = safeQuery(item, [
-                        'img[class*="avatar"]',
-                        '.avatar img',
-                        'img'
-                    ]);
-                    const avatar = avatarImg ? normalizeUrl(avatarImg.src) : '';
-
-                    // Nickname
-                    const nicknameEl = safeQuery(item, [
-                        '[class*="name"]',
-                        '[class*="user"]',
-                        '.nick'
-                    ]);
-                    const nickname = nicknameEl ? cleanText(nicknameEl.textContent) : '';
-
-                    // Content
-                    const contentEl = safeQuery(item, [
-                        '[class*="content"]',
-                        '[class*="text"]',
-                        '.txt'
-                    ]);
-                    const content = contentEl ? cleanText(contentEl.textContent) : '';
-
-                    // Time
-                    const timeEl = safeQuery(item, [
-                        '[class*="time"]',
-                        '.time',
-                        'time'
-                    ]);
-                    const publishTime = timeEl ? formatTime(timeEl.textContent) : '';
-
-                    console.log(`评论 #${index + 1}:`, {
-                        nickname: nickname,
-                        content: content.substring(0, 30) + '...',
-                        time: publishTime
-                    });
-
-                    // Only add if we have basic info - using unified schema
-                    if (nickname && content) {
-                        result.list.push(createComment(
-                            avatar,
-                            nickname,
-                            publishTime,
-                            content,
-                            [] // NetEase comments typically don't have nested replies
-                        ));
-                    } else {
-                        console.warn(`评论 #${index + 1} 数据不完整，跳过`);
-                    }
+                console.log(`评论 #${index + 1}:`, {
+                    nickname: nickname,
+                    content: content.substring(0, 30) + '...',
+                    time: publishTime
                 });
-            } else {
-                console.warn('未找到评论容器');
-            }
+
+                // Only add if we have basic info - using unified schema
+                if (nickname && content) {
+                    result.list.push(createComment(
+                        avatar,
+                        nickname,
+                        publishTime,
+                        content,
+                        [] // NetEase comments typically don't have nested replies
+                    ));
+                } else {
+                    console.warn(`评论 #${index + 1} 数据不完整，跳过`);
+                }
+            });
 
             console.log('--- 评论提取完成 ---');
             console.log('成功提取评论数:', result.list.length);

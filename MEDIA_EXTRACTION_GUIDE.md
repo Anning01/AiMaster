@@ -21,19 +21,24 @@ const videos = safeQueryAll(contentEl, ['video']);
 
 ### 2. 图片过滤规则
 
-#### 2.1 按class过滤
-自动跳过以下类型的图片:
+#### 2.1 按class过滤 (精确匹配)
+自动跳过以下类型的图片 **(使用精确类名匹配,不是子串匹配)**:
 - `avatar` - 头像
 - `logo` - Logo
 - `icon` - 图标
 - `emoji` - 表情
 - `qrcode` - 二维码
-- `ad` / `advertisement` - 广告
+- `ad` - 广告 (注意:只匹配类名完全为"ad",不会误判"load"等包含"ad"的类名)
 - `banner` - 横幅
 - `placeholder` - 占位符
 - `blank` - 空白图
 - `button` - 按钮图标
 - `nav` - 导航图标
+
+**示例**:
+- ✅ `class="ad"` → 会被过滤
+- ❌ `class="qnr-img-lazy-load-img"` → 不会被过滤 (虽然"load"包含"ad",但不是完整类名匹配)
+- ❌ `class="header-ad-banner"` → 不会被过滤 ("header-ad-banner"不等于"ad")
 
 #### 2.2 按尺寸过滤
 - 宽度或高度 < 50像素的图片会被跳过
@@ -106,7 +111,9 @@ videos.forEach((video) => {
 ```
 输入: img元素
   ↓
-检查class → 包含skipClasses? → 返回 null
+拆分className → 按空格分割成类名数组 ["qnt-img-img", "qnr-img-lazy-load-img"]
+  ↓
+精确匹配 → 类名数组中是否包含skipClasses中的完整类名? → 返回 null
   ↓ 否
 检查尺寸 → 宽或高 < 50px? → 返回 null
   ↓ 否
@@ -148,6 +155,30 @@ src为空? → 返回 null
 这种设计确保:
 - 即使contentEl选择器不够精确,也能过滤掉非内容媒体
 - 提高了爬虫的稳定性和准确性
+
+### 1.5 精确类名匹配 (v1.1.1新增)
+**为什么使用精确匹配而不是子串匹配?**
+
+❌ **错误做法** (子串匹配):
+```javascript
+const classList = imgElement.className; // "qnr-img-lazy-load-img"
+if (classList.includes('ad')) {  // "load"包含"ad" → 误判!
+    return null;
+}
+```
+
+✅ **正确做法** (精确匹配):
+```javascript
+const classNames = imgElement.className.split(/\s+/); // ["qnr-img-lazy-load-img"]
+if (classNames.includes('ad')) {  // "qnr-img-lazy-load-img" !== "ad" → 正确!
+    return null;
+}
+```
+
+**真实案例**:
+- 腾讯新闻图片: `class="qnt-img-img qnr-img-lazy-load-img"`
+- 旧逻辑: "load"包含"ad" → 被过滤 ❌
+- 新逻辑: "qnr-img-lazy-load-img" ≠ "ad" → 不过滤 ✅
 
 ### 2. 保守策略
 采用"宁可少提,不可多提"的策略:

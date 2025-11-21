@@ -88,29 +88,33 @@ const BaiduCrawler = {
                 'article',
                 '.article-content'
             ]);
-
+            console.log(contentEl);
+            
             if (contentEl) {
                 console.log('找到内容容器');
 
-                // Extract paragraphs - using unified format
-                const paragraphs = safeQueryAll(contentEl, [
-                    '.dpu8C p, ._2kCxD p',
+                // Extract paragraphs - use stable bjh-p class instead of dynamic hash classes
+                // Baidu uses <span class="bjh-p"> for content paragraphs
+                const paragraphSpans = safeQueryAll(contentEl, [
+                    'span.bjh-p',
+                    'span[class*="bjh-"]',
                     'p'
                 ]);
-                console.log('找到段落数量:', paragraphs.length);
+                console.log('找到段落数量:', paragraphSpans.length);
 
-                paragraphs.forEach((p) => {
-                    const text = cleanText(p.textContent);
-                    if (text && text.length > 0) {
+                paragraphSpans.forEach((span) => {
+                    const text = cleanText(span.textContent);
+                    // Skip very short text (likely labels or markers)
+                    if (text && text.length > 10) {
                         article.contentList.push(text);
                     }
                 });
                 console.log('提取段落数量:', article.contentList.length);
 
-                // Extract images - using unified format
+                // Extract images - avoid dynamic class names
                 const images = safeQueryAll(contentEl, [
-                    '._3hMwG img, ._1NCGf img',
-                    'img:not([class*="avatar"])'
+                    'img:not([class*="avatar"])',
+                    'img'
                 ]);
                 console.log('找到图片数量:', images.length);
 

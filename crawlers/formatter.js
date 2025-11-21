@@ -174,32 +174,44 @@ function extractImage(imgElement, baseUrl = '') {
     if (!imgElement) return null;
 
     // Skip UI elements and non-content images
-    const classList = imgElement.className || '';
+    // Split className into individual class names for exact matching
+    const classNames = (imgElement.className || '').split(/\s+/).map(c => c.toLowerCase());
     const skipClasses = [
         'avatar', 'logo', 'icon', 'emoji', 'qrcode', 'ad',
         'banner', 'placeholder', 'blank', 'button', 'nav'
     ];
 
+    // Use exact class name matching (not substring matching)
     for (const skipClass of skipClasses) {
-        if (classList.toLowerCase().includes(skipClass)) {
+        if (classNames.includes(skipClass)) {
+            console.log("Skipping image due to class:", skipClass);
             return null;
         }
     }
 
     // Skip small images (likely icons or UI elements)
-    const width = parseInt(imgElement.width) || parseInt(imgElement.naturalWidth) || 0;
-    const height = parseInt(imgElement.height) || parseInt(imgElement.naturalHeight) || 0;
-    if ((width > 0 && width < 50) || (height > 0 && height < 50)) {
-        return null;
+    // Only filter if we can determine the size AND it's small
+    const width = parseInt(imgElement.width) || parseInt(imgElement.naturalWidth) ||
+                  parseInt(imgElement.getAttribute('width')) || 0;
+    const height = parseInt(imgElement.height) || parseInt(imgElement.naturalHeight) ||
+                   parseInt(imgElement.getAttribute('height')) || 0;
+    console.log("Image dimensions:", width, height);
+    
+    // Only skip if BOTH dimensions are set AND at least one is small
+    if (width > 0 && height > 0) {
+        if (width < 50 || height < 50) {
+            return null;
+        }
     }
-
+    console.log("Image dimensions:", width, height);
     // Try multiple attributes for image source
     const src = imgElement.src ||
                 imgElement.getAttribute('data-src') ||
                 imgElement.getAttribute('data-original') ||
                 imgElement.getAttribute('data-lazy-src') ||
                 '';
-
+    console.log(src);
+    
     if (!src) return null;
 
     // Skip blank/placeholder images
@@ -228,11 +240,13 @@ function extractVideo(videoElement, baseUrl = '') {
     if (!videoElement) return null;
 
     // Skip ad videos and UI elements
-    const classList = videoElement.className || '';
+    // Split className into individual class names for exact matching
+    const classNames = (videoElement.className || '').split(/\s+/).map(c => c.toLowerCase());
     const skipClasses = ['ad', 'advertisement', 'banner', 'promo'];
 
+    // Use exact class name matching (not substring matching)
     for (const skipClass of skipClasses) {
-        if (classList.toLowerCase().includes(skipClass)) {
+        if (classNames.includes(skipClass)) {
             return null;
         }
     }

@@ -221,13 +221,26 @@ const SohuCrawler = {
                 console.warn('未找到评论计数元素');
             }
 
-            // Find comment items - support multiple formats
-            let commentItems = safeQueryAll(document, [
-                '.comment-item[data-v-586d6cf8]',
-                '.comment-item',
-                '[class*="comment-item"]'
-            ]);
-            console.log('找到评论项数量:', commentItems.length);
+            // Find comment items - Sohu uses direct class matching
+            // Note: Don't use safeQueryAll here as it returns empty for Sohu's structure
+            let commentItems = [];
+            try {
+                // Try direct querySelectorAll for Sohu's comment structure
+                commentItems = Array.from(document.querySelectorAll('.comment-item'));
+                console.log('找到评论项数量 (direct query):', commentItems.length);
+            } catch (e) {
+                console.error('直接查询评论失败:', e);
+            }
+
+            // Fallback to safeQueryAll if direct query failed
+            if (commentItems.length === 0) {
+                commentItems = safeQueryAll(document, [
+                    '.comment-item',
+                    '[class*="comment-item"]',
+                    '.item[data-spm-type="resource"]'
+                ]);
+                console.log('找到评论项数量 (fallback):', commentItems.length);
+            }
 
             commentItems.forEach((item, index) => {
                 console.log(`处理评论 #${index + 1}...`);
