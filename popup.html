@@ -12,7 +12,7 @@
         }
 
         body {
-            width: 380px;
+            width: 320px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: #f5f7fa;
         }
@@ -20,59 +20,83 @@
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 16px;
+            padding: 10px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .header h1 {
-            font-size: 18px;
-            margin-bottom: 8px;
+            font-size: 16px;
+            margin: 0;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .user-info {
-            font-size: 12px;
+            font-size: 11px;
             opacity: 0.9;
         }
 
+        .admin-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .admin-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
         .container {
-            padding: 16px;
+            padding: 10px;
         }
 
         .platform-info {
             background: white;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
-        .platform-info .label {
-            font-size: 12px;
+        .platform-left .label {
+            font-size: 11px;
             color: #666;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
 
-        .platform-info .value {
-            font-size: 14px;
+        .platform-left .value {
+            font-size: 13px;
             font-weight: 600;
             color: #333;
         }
 
-        .platform-info .value.unknown {
+        .platform-left .value.unknown {
             color: #999;
         }
 
-        .action-buttons {
+        .platform-actions {
             display: flex;
-            gap: 8px;
-            margin-bottom: 16px;
+            gap: 6px;
         }
 
         .btn {
-            flex: 1;
-            padding: 10px;
+            padding: 6px 10px;
             border: none;
-            border-radius: 6px;
-            font-size: 14px;
+            border-radius: 4px;
+            font-size: 12px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
@@ -103,27 +127,27 @@
 
         .tasks-section {
             background: white;
-            border-radius: 8px;
-            padding: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 6px;
+            padding: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
         .tasks-header {
-            font-size: 14px;
+            font-size: 12px;
             font-weight: 600;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
             color: #333;
         }
 
         .task-list {
-            max-height: 300px;
+            max-height: 240px;
             overflow-y: auto;
         }
 
         .task-item {
-            padding: 10px;
+            padding: 8px;
             border-bottom: 1px solid #eee;
-            font-size: 12px;
+            font-size: 11px;
         }
 
         .task-item:last-child {
@@ -132,7 +156,7 @@
 
         .task-title {
             font-weight: 500;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
             color: #333;
             white-space: nowrap;
             overflow: hidden;
@@ -142,8 +166,13 @@
         .task-status {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 4px;
+            gap: 6px;
+        }
+
+        .task-time {
+            font-size: 10px;
+            color: #999;
+            margin-left: auto;
         }
 
         .status-badge {
@@ -239,37 +268,172 @@
         .settings-btn:hover {
             background: #edf2f7;
         }
+
+        /* 登录相关样式 */
+        .login-container {
+            padding: 20px;
+        }
+
+        .login-form {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .login-form h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .captcha-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .captcha-row input {
+            flex: 1;
+        }
+
+        .captcha-img {
+            height: 40px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .login-btn:hover {
+            background: #5568d3;
+        }
+
+        .login-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .error-msg {
+            color: #e53e3e;
+            font-size: 12px;
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .logout-btn {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.8);
+            font-size: 12px;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .logout-btn:hover {
+            color: white;
+        }
+
+        .hidden {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🤖 AiMaster</h1>
-        <div class="user-info">当前用户: <span id="username">admin</span></div>
+    <!-- 登录页面 -->
+    <div id="loginPage">
+        <div class="header">
+            <h1>🤖 AiMaster</h1>
+            <div class="user-info">请登录后使用</div>
+        </div>
+        <div class="login-container">
+            <div class="login-form">
+                <h2>登录</h2>
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="loginUsername" placeholder="请输入用户名">
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="loginPassword" placeholder="请输入密码">
+                </div>
+                <div class="form-group">
+                    <label>验证码</label>
+                    <div class="captcha-row">
+                        <input type="text" id="loginCaptcha" placeholder="请输入验证码">
+                        <img id="captchaImg" class="captcha-img" alt="验证码" title="点击刷新">
+                    </div>
+                </div>
+                <button class="login-btn" id="loginBtn">登录</button>
+                <div class="error-msg hidden" id="loginError"></div>
+            </div>
+            <button class="settings-btn" id="loginSettingsBtn">💻 打开后台管理</button>
+        </div>
     </div>
 
-    <div class="container">
-        <div class="platform-info">
-            <div class="label">检测到的平台</div>
-            <div class="value" id="platformName">未知平台</div>
-        </div>
-
-        <div class="action-buttons">
-            <button class="btn btn-primary" id="crawlBtn" disabled>
-                爬取文章
-            </button>
-            <button class="btn btn-success" id="refreshBtn">
-                刷新状态
-            </button>
-        </div>
-
-        <div class="tasks-section">
-            <div class="tasks-header">任务列表</div>
-            <div class="task-list" id="taskList">
-                <div class="empty-state">暂无任务</div>
+    <!-- 主页面 -->
+    <div id="mainPage" class="hidden">
+        <div class="header">
+            <h1>🤖 AiMaster</h1>
+            <div class="header-right">
+                <span class="user-info"><span id="username">-</span></span>
+                <button class="admin-btn" id="settingsBtn">进入后台</button>
+                <button class="logout-btn" id="logoutBtn">退出</button>
             </div>
         </div>
 
-        <button class="settings-btn" id="settingsBtn">⚙️ 设置后端地址</button>
+        <div class="container">
+            <div class="platform-info">
+                <div class="platform-left">
+                    <div class="label">检测到的平台</div>
+                    <div class="value" id="platformName">未知平台</div>
+                </div>
+                <div class="platform-actions">
+                    <button class="btn btn-primary" id="crawlBtn" disabled>爬取</button>
+                    <button class="btn btn-success" id="refreshBtn">刷新</button>
+                </div>
+            </div>
+
+            <div class="tasks-section">
+                <div class="tasks-header">任务列表</div>
+                <div class="task-list" id="taskList">
+                    <div class="empty-state">暂无任务</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="popup.js"></script>

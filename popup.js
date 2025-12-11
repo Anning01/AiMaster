@@ -1,5 +1,10 @@
 // 后端 API 地址
-let API_BASE_URL = 'http://localhost:8000';
+let API_BASE_URL = 'http://192.168.10.37:8001';
+
+// 认证信息
+let authToken = '';
+let currentUser = null;
+let captchaId = '';
 
 // 获取当前标签页
 async function getCurrentTab() {
@@ -9,30 +14,170 @@ async function getCurrentTab() {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
-    // 从 storage 中读取后端地址
-    const result = await chrome.storage.local.get(['apiBaseUrl']);
+    // 从 storage 中读取配置
+    const result = await chrome.storage.local.get(['apiBaseUrl', 'authToken', 'currentUser']);
     if (result.apiBaseUrl) {
         API_BASE_URL = result.apiBaseUrl;
     }
+    if (result.authToken && result.currentUser) {
+        authToken = result.authToken;
+        currentUser = result.currentUser;
+    }
 
-    // 检测当前页面平台
-    await detectPlatform();
+    // 检查登录状态
+    if (authToken) {
+        await checkAuthAndShowMain();
+    } else {
+        showLoginPage();
+    }
 
-    // 加载任务列表
-    await loadTasks();
+    // 绑定登录页事件
+    document.getElementById('loginBtn').addEventListener('click', handleLogin);
+    document.getElementById('captchaImg').addEventListener('click', refreshCaptcha);
+    document.getElementById('loginSettingsBtn').addEventListener('click', openAdminPanel);
+    document.getElementById('loginPassword').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleLogin();
+    });
+    document.getElementById('loginCaptcha').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleLogin();
+    });
 
-    // 绑定事件
+    // 绑定主页事件
     document.getElementById('crawlBtn').addEventListener('click', handleCrawl);
     document.getElementById('refreshBtn').addEventListener('click', loadTasks);
-    document.getElementById('settingsBtn').addEventListener('click', handleSettings);
+    document.getElementById('settingsBtn').addEventListener('click', openAdminPanel);
+    document.getElementById('logoutBtn').addEventListener('click', handleLogout);
 });
+
+// 显示登录页
+function showLoginPage() {
+    document.getElementById('loginPage').classList.remove('hidden');
+    document.getElementById('mainPage').classList.add('hidden');
+    refreshCaptcha();
+}
+
+// 显示主页
+function showMainPage() {
+    document.getElementById('loginPage').classList.add('hidden');
+    document.getElementById('mainPage').classList.remove('hidden');
+    document.getElementById('username').textContent = currentUser?.username || '-';
+}
+
+// 检查认证并显示主页
+async function checkAuthAndShowMain() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (response.ok) {
+            currentUser = await response.json();
+            await chrome.storage.local.set({ currentUser });
+            showMainPage();
+            await detectPlatform();
+            await loadTasks();
+        } else {
+            throw new Error('Token invalid');
+        }
+    } catch (error) {
+        console.error('Auth check failed:', error);
+        await handleLogout();
+    }
+}
+
+// 刷新验证码
+async function refreshCaptcha() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/captcha`);
+        if (response.ok) {
+            const data = await response.json();
+            captchaId = data.captcha_id;
+            document.getElementById('captchaImg').src = data.captcha_image;
+        }
+    } catch (error) {
+        console.error('获取验证码失败:', error);
+        showLoginError('无法连接服务器，请检查后端地址');
+    }
+}
+
+// 显示登录错误
+function showLoginError(msg) {
+    const errorEl = document.getElementById('loginError');
+    errorEl.textContent = msg;
+    errorEl.classList.remove('hidden');
+}
+
+// 隐藏登录错误
+function hideLoginError() {
+    document.getElementById('loginError').classList.add('hidden');
+}
+
+// 处理登录
+async function handleLogin() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const captchaCode = document.getElementById('loginCaptcha').value.trim();
+
+    if (!username || !password || !captchaCode) {
+        showLoginError('请填写完整信息');
+        return;
+    }
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = '登录中...';
+    hideLoginError();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username,
+                password,
+                captcha_id: captchaId,
+                captcha_code: captchaCode
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            authToken = data.access_token;
+            currentUser = data.user;
+            
+            await chrome.storage.local.set({ authToken, currentUser });
+            
+            showMainPage();
+            await detectPlatform();
+            await loadTasks();
+        } else {
+            const error = await response.json();
+            showLoginError(error.detail || '登录失败');
+            refreshCaptcha();
+            document.getElementById('loginCaptcha').value = '';
+        }
+    } catch (error) {
+        console.error('登录失败:', error);
+        showLoginError('无法连接服务器');
+        refreshCaptcha();
+    } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = '登录';
+    }
+}
+
+// 处理退出
+async function handleLogout() {
+    authToken = '';
+    currentUser = null;
+    await chrome.storage.local.remove(['authToken', 'currentUser']);
+    showLoginPage();
+}
 
 // 检测平台
 async function detectPlatform() {
     const tab = await getCurrentTab();
 
     try {
-        // 向 content script 发送消息获取平台信息
         const response = await chrome.tabs.sendMessage(tab.id, { action: 'detectPlatform' });
 
         const platformNameEl = document.getElementById('platformName');
@@ -60,108 +205,66 @@ async function handleCrawl() {
     crawlBtn.disabled = true;
     crawlBtn.textContent = '爬取中...';
 
-    console.log('=== 开始爬取文章 ===');
-
     try {
         const tab = await getCurrentTab();
-        console.log('当前标签页:', tab.url);
-
-        // 向 content script 发送爬取消息
-        console.log('发送爬取消息到 content script...');
         const response = await chrome.tabs.sendMessage(tab.id, { action: 'crawlArticle' });
-        console.log('Content script 响应:', response);
 
         if (response && response.success) {
-            console.log('爬取成功，文章数据:', {
-                platform: response.platform,
-                title: response.article.title,
-                contentLength: response.article.contents?.length || response.article.content?.length || 0,
-                imagesCount: response.article.images?.length || 0,
-                commentsCount: response.article.commentCount || 0
-            });
-
-            // 将数据发送到后端
-            console.log('提交数据到后端:', API_BASE_URL);
-            const requestBody = {
-                user: 'admin',
-                platform: response.platform,
-                article: response.article
-            };
-            console.log('请求体:', JSON.stringify(requestBody, null, 2));
-
             const result = await fetch(`${API_BASE_URL}/api/articles`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify(requestBody)
+                body: JSON.stringify({
+                    platform: response.platform,
+                    article: response.article
+                })
             });
-
-            console.log('后端响应状态:', result.status, result.statusText);
 
             if (result.ok) {
                 const data = await result.json();
-                console.log('后端响应数据:', data);
-                alert('文章已提交处理！任务ID: ' + data.task_id);
+                alert('文章已提交！任务ID: ' + data.task_id);
                 await loadTasks();
             } else {
+                if (result.status === 401) {
+                    await handleLogout();
+                    return;
+                }
                 const errorText = await result.text();
-                console.error('后端返回错误:', errorText);
                 throw new Error(`提交失败 (${result.status}): ${errorText}`);
             }
         } else {
-            console.error('爬取失败，响应:', response);
             throw new Error(response?.error || '爬取失败');
         }
     } catch (error) {
-        console.error('=== 爬取过程出错 ===');
-        console.error('错误类型:', error.name);
-        console.error('错误消息:', error.message);
-        console.error('错误堆栈:', error.stack);
-
-        let errorMsg = error.message;
-        if (error.message.includes('Failed to fetch')) {
-            errorMsg = '无法连接到后端服务器，请检查：\n' +
-                      '1. 后端服务是否启动\n' +
-                      '2. 后端地址是否正确: ' + API_BASE_URL + '\n' +
-                      '3. 后端是否开启了CORS';
-        }
-
-        alert('爬取失败: ' + errorMsg);
+        console.error('爬取失败:', error);
+        alert('爬取失败: ' + error.message);
     } finally {
         crawlBtn.disabled = false;
         crawlBtn.textContent = '爬取文章';
-        console.log('=== 爬取流程结束 ===');
     }
 }
 
 // 加载任务列表
 async function loadTasks() {
-    console.log('=== 加载任务列表 ===');
-    console.log('后端地址:', API_BASE_URL);
-
     try {
-        const response = await fetch(`${API_BASE_URL}/api/tasks?user=admin`);
-        console.log('任务列表响应状态:', response.status, response.statusText);
+        const response = await fetch(`${API_BASE_URL}/api/articles?size=10`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
 
         if (!response.ok) {
-            throw new Error('获取任务列表失败: ' + response.status);
+            if (response.status === 401) {
+                await handleLogout();
+                return;
+            }
+            throw new Error('获取任务列表失败');
         }
 
         const tasks = await response.json();
-        console.log('获取到任务数量:', tasks.length);
-        if (tasks.length > 0) {
-            console.log('任务列表:', tasks);
-        }
         renderTasks(tasks);
     } catch (error) {
         console.error('加载任务失败:', error);
-        console.error('错误详情:', {
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-        });
-        // 如果后端未连接，显示空状态
         renderTasks([]);
     }
 }
@@ -175,82 +278,45 @@ function renderTasks(tasks) {
         return;
     }
 
-    taskList.innerHTML = tasks.map(task => {
-        const statusMap = {
-            'crawling': { text: '爬取中', class: 'crawling' },
-            'processing': { text: 'AI改写中', class: 'processing' },
-            'completed': { text: '已完成', class: 'completed' },
-            'error': { text: '失败', class: 'error' }
-        };
+    const statusMap = {
+        'pending_rewrite': { text: '待改写', class: 'crawling' },
+        'rewritten': { text: '已改写', class: 'processing' },
+        'pending_publish': { text: '待发布', class: 'processing' },
+        'published': { text: '已发布', class: 'completed' }
+    };
 
+    taskList.innerHTML = tasks.map(task => {
         const status = statusMap[task.status] || { text: task.status, class: 'crawling' };
-        const progress = task.progress || 0;
+        const createdAt = task.created_at ? formatTime(task.created_at) : '';
 
         return `
             <div class="task-item" data-task-id="${task.id}">
-                <div class="task-title" title="${task.title}">${task.title}</div>
+                <div class="task-title" title="${task.original_title}">${task.original_title}</div>
                 <div class="task-status">
                     <span class="status-badge ${status.class}">${status.text}</span>
-                    <span style="font-size: 11px; color: #999;">${task.platform || '未知平台'}</span>
+                    <span style="font-size: 10px; color: #999;">${task.platform || ''}</span>
+                    <span class="task-time">${createdAt}</span>
                 </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: ${progress}%"></div>
-                </div>
-                <div style="font-size: 11px; color: #999; margin-bottom: 6px;">
-                    进度: ${progress}%
-                </div>
-                ${task.status === 'completed' ? `
-                    <div class="task-actions">
-                        <button class="btn-small btn-publish" onclick="handlePublish('${task.id}', '${task.targetPlatform || 'auto'}')">
-                            发布到编辑器
-                        </button>
-                    </div>
-                ` : ''}
             </div>
         `;
     }).join('');
 }
 
-// 处理发布
-window.handlePublish = async function(task_id, targetPlatform) {
-    try {
-        // 获取任务详情
-        const response = await fetch(`${API_BASE_URL}/api/tasks/${task_id}`);
-        if (!response.ok) {
-            throw new Error('获取任务详情失败');
-        }
+// 格式化时间
+function formatTime(timeStr) {
+    const date = new Date(timeStr);
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${month}-${day} ${hours}:${minutes}`;
+}
 
-        const task = await response.json();
-
-        // 获取当前标签页
-        const tab = await getCurrentTab();
-
-        // 向 content script 发送发布消息
-        const result = await chrome.tabs.sendMessage(tab.id, {
-            action: 'publishArticle',
-            article: task.rewrittenArticle,
-            platform: targetPlatform
-        });
-
-        if (result && result.success) {
-            alert('文章已插入编辑器！');
-        } else {
-            throw new Error(result?.error || '发布失败');
-        }
-    } catch (error) {
-        console.error('发布失败:', error);
-        alert('发布失败: ' + error.message + '\n\n请确保当前页面是支持的发布平台');
-    }
-};
-
-// 处理设置
-async function handleSettings() {
-    const newUrl = prompt('请输入后端 API 地址:', API_BASE_URL);
-
-    if (newUrl && newUrl.trim()) {
-        API_BASE_URL = newUrl.trim();
-        await chrome.storage.local.set({ apiBaseUrl: API_BASE_URL });
-        alert('后端地址已更新！');
-        await loadTasks();
-    }
+// 打开后台管理
+function openAdminPanel() {
+    // 从API地址提取后台管理地址（假设前端在同一服务器的3000端口）
+    const url = new URL(API_BASE_URL);
+    const adminUrl = `${url.protocol}//${url.hostname}:3000`;
+    
+    chrome.tabs.create({ url: adminUrl });
 }
