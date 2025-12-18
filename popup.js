@@ -316,7 +316,7 @@ function formatTime(timeStr) {
 function openAdminPanel() {
     // 从API地址提取后台管理地址（假设前端在同一服务器的3000端口）
     const url = new URL(API_BASE_URL);
-    const adminUrl = `${url.protocol}//${url.hostname}:3000`;
+    const adminUrl = `${url.protocol}//${url.hostname}`;
     
     chrome.tabs.create({ url: adminUrl });
 }
