@@ -2,6 +2,13 @@
 
 AiMaster(AI大师) 是一个谷歌浏览器的插件，用于在网易、头条、腾讯等新闻平台一键改写文章，并且支持在公众号、头条等平台将改写的文章自动插入编辑器。
 
+## 后台管理页面
+<!-- 显眼的按钮样式，点击直接跳转 -->
+<a href="https://aimedia.daniu7.cn" target="_blank" style="display: inline-block; padding: 12px 30px; background-color: #1677ff; color: white; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600;">
+  点击进入后台管理系统
+</a>
+
+
 ## 项目结构
 
 ```
@@ -85,11 +92,6 @@ AiMaster/
 4. 点击"加载已解压的扩展程序"
 5. 选择 AiMaster 项目文件夹
 
-### 3. 配置后端地址
-
-1. 点击浏览器工具栏中的 AiMaster 图标
-2. 点击"⚙️ 设置后端地址"
-3. 输入你的后端 API 地址（默认：http://localhost:8000）
 
 ## 使用流程
 

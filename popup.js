@@ -1,5 +1,5 @@
 // 后端 API 地址
-let API_BASE_URL = 'http://192.168.10.37:8001';
+let API_BASE_URL = 'https://aimedia.daniu7.cn';
 
 // 认证信息
 let authToken = '';
