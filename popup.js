@@ -3,8 +3,10 @@ let API_BASE_URL = 'https://aimedia.daniu7.cn';
 
 // 认证信息
 let authToken = '';
+let refreshToken = '';
 let currentUser = null;
 let captchaId = '';
+let isRefreshing = false;
 
 // 获取当前标签页
 async function getCurrentTab() {
@@ -12,22 +14,104 @@ async function getCurrentTab() {
     return tab;
 }
 
-// 初始化
-document.addEventListener('DOMContentLoaded', async () => {
-    // 从 storage 中读取配置
-    const result = await chrome.storage.local.get(['apiBaseUrl', 'authToken', 'currentUser']);
-    if (result.apiBaseUrl) {
-        API_BASE_URL = result.apiBaseUrl;
-    }
-    if (result.authToken && result.currentUser) {
-        authToken = result.authToken;
-        currentUser = result.currentUser;
+// 封装带认证的请求
+async function authFetch(url, options = {}) {
+    options.headers = options.headers || {};
+    
+    // 如果有token，添加认证头
+    if (authToken) {
+        options.headers['Authorization'] = `Bearer ${authToken}`;
     }
 
-    // 检查登录状态
-    if (authToken) {
-        await checkAuthAndShowMain();
-    } else {
+    try {
+        const response = await fetch(url, options);
+        
+        // 处理 401 未认证
+        if (response.status === 401) {
+            // 如果已经在刷新中，或者当前请求就是刷新请求，则直接返回错误
+            if (isRefreshing || url.includes('/auth/refresh')) {
+                throw new Error('Unauthorized');
+            }
+
+            // 尝试刷新 token
+            const success = await handleRefreshToken();
+            if (success) {
+                // 刷新成功，重试请求
+                options.headers['Authorization'] = `Bearer ${authToken}`;
+                return await fetch(url, options);
+            } else {
+                // 刷新失败，登出
+                await handleLogout();
+                throw new Error('Session expired');
+            }
+        }
+
+        return response;
+    } catch (error) {
+        throw error;
+    }
+}
+
+// 处理 Token 刷新
+async function handleRefreshToken() {
+    if (!refreshToken || isRefreshing) return false;
+    
+    isRefreshing = true;
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            authToken = data.access_token;
+            // 如果后端返回了新的 refresh_token，也更新它
+            if (data.refresh_token) {
+                refreshToken = data.refresh_token;
+            }
+            if (data.user) {
+                currentUser = data.user;
+            }
+            
+            await chrome.storage.local.set({ 
+                authToken, 
+                refreshToken, 
+                currentUser 
+            });
+            return true;
+        }
+    } catch (error) {
+        console.error('Token refresh failed:', error);
+    } finally {
+        isRefreshing = false;
+    }
+    return false;
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        // 从 storage 中读取配置
+        const result = await chrome.storage.local.get(['apiBaseUrl', 'authToken', 'refreshToken', 'currentUser']);
+        if (result.apiBaseUrl) {
+            API_BASE_URL = result.apiBaseUrl;
+        }
+        if (result.authToken) {
+            authToken = result.authToken;
+            currentUser = result.currentUser;
+            refreshToken = result.refreshToken || '';
+        }
+
+        // 检查登录状态
+        if (authToken) {
+            await checkAuthAndShowMain();
+        } else {
+            showLoginPage();
+        }
+    } catch (error) {
+        console.error('Initialization failed:', error);
         showLoginPage();
     }
 
@@ -49,30 +133,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('logoutBtn').addEventListener('click', handleLogout);
 });
 
+// 显示页面通用函数
+function showPage(pageId) {
+    // 隐藏所有页面
+    ['loadingPage', 'loginPage', 'mainPage'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+    // 显示目标页面
+    document.getElementById(pageId).classList.remove('hidden');
+}
+
 // 显示登录页
 function showLoginPage() {
-    document.getElementById('loginPage').classList.remove('hidden');
-    document.getElementById('mainPage').classList.add('hidden');
+    showPage('loginPage');
     refreshCaptcha();
 }
 
 // 显示主页
 function showMainPage() {
-    document.getElementById('loginPage').classList.add('hidden');
-    document.getElementById('mainPage').classList.remove('hidden');
+    showPage('mainPage');
     document.getElementById('username').textContent = currentUser?.username || '-';
 }
 
 // 检查认证并显示主页
 async function checkAuthAndShowMain() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-        });
+        // 先显示主页框架，避免等待 API 请求
+        showMainPage();
+        
+        const response = await authFetch(`${API_BASE_URL}/api/auth/me`);
         if (response.ok) {
             currentUser = await response.json();
             await chrome.storage.local.set({ currentUser });
-            showMainPage();
+            // 更新用户信息显示
+            document.getElementById('username').textContent = currentUser?.username || '-';
+            
+            // 后台加载其他数据
             await detectPlatform();
             await loadTasks();
         } else {
@@ -80,7 +177,12 @@ async function checkAuthAndShowMain() {
         }
     } catch (error) {
         console.error('Auth check failed:', error);
-        await handleLogout();
+        // authFetch 内部已经处理了刷新失败导致的 logout
+        // 但如果只是网络错误或者其他原因，authFetch 可能抛出异常
+        // 如果这里没有 token 了，说明确实需要登录
+        if (!authToken) {
+             showLoginPage();
+        }
     }
 }
 
@@ -142,9 +244,10 @@ async function handleLogin() {
         if (response.ok) {
             const data = await response.json();
             authToken = data.access_token;
+            refreshToken = data.refresh_token;
             currentUser = data.user;
             
-            await chrome.storage.local.set({ authToken, currentUser });
+            await chrome.storage.local.set({ authToken, refreshToken, currentUser });
             
             showMainPage();
             await detectPlatform();
@@ -168,8 +271,9 @@ async function handleLogin() {
 // 处理退出
 async function handleLogout() {
     authToken = '';
+    refreshToken = '';
     currentUser = null;
-    await chrome.storage.local.remove(['authToken', 'currentUser']);
+    await chrome.storage.local.remove(['authToken', 'refreshToken', 'currentUser']);
     showLoginPage();
 }
 
@@ -210,11 +314,10 @@ async function handleCrawl() {
         const response = await chrome.tabs.sendMessage(tab.id, { action: 'crawlArticle' });
 
         if (response && response.success) {
-            const result = await fetch(`${API_BASE_URL}/api/articles`, {
+            const result = await authFetch(`${API_BASE_URL}/api/articles`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     platform: response.platform,
@@ -227,11 +330,8 @@ async function handleCrawl() {
                 alert('文章已提交！任务ID: ' + data.task_id);
                 await loadTasks();
             } else {
-                if (result.status === 401) {
-                    await handleLogout();
-                    return;
-                }
                 const errorText = await result.text();
+                // authFetch 已经处理了 401，这里只有非 401 错误
                 throw new Error(`提交失败 (${result.status}): ${errorText}`);
             }
         } else {
@@ -239,7 +339,10 @@ async function handleCrawl() {
         }
     } catch (error) {
         console.error('爬取失败:', error);
-        alert('爬取失败: ' + error.message);
+        // 如果是 Session expired，已经被 handleLogout 处理，不需要 alert
+        if (error.message !== 'Session expired') {
+            alert('爬取失败: ' + error.message);
+        }
     } finally {
         crawlBtn.disabled = false;
         crawlBtn.textContent = '爬取文章';
@@ -249,15 +352,9 @@ async function handleCrawl() {
 // 加载任务列表
 async function loadTasks() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/articles?size=10`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-        });
+        const response = await authFetch(`${API_BASE_URL}/api/articles?size=10`);
 
         if (!response.ok) {
-            if (response.status === 401) {
-                await handleLogout();
-                return;
-            }
             throw new Error('获取任务列表失败');
         }
 
